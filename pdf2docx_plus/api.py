@@ -32,7 +32,17 @@ from typing import IO, Any
 
 from . import fidelity  # noqa: F401  (install monkey-patches on import)
 from .consolidate import consolidate_runs
-from .emit import apply_lists, collapse_empty_paragraphs, extract_headers_footers
+from .emit import (
+    apply_lists,
+    clamp_paragraph_spacing,
+    collapse_empty_paragraphs,
+    extract_headers_footers,
+    fix_page_margins,
+    insert_page_breaks,
+    merge_consecutive_single_row_tables,
+    normalize_multi_column_sections,
+    unwrap_tiny_tables,
+)
 from .errors import (
     ConversionError,
     InputError,
@@ -77,6 +87,11 @@ class ConversionResult:
     headers_footers_detected: int = 0
     headers_footers_extracted: int = 0
     empty_paragraphs_removed: int = 0
+    multi_col_sections_normalized: int = 0
+    spacing_clamped: int = 0
+    page_breaks_inserted: int = 0
+    tiny_tables_unwrapped: int = 0
+    tables_merged: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
     peak_rss_mb: float | None = None
@@ -173,8 +188,13 @@ class Converter:
         extract_headers_footers_to_section: bool = False,
         consolidate_adjacent_runs: bool = True,
         collapse_empty_paras: bool = True,
+        normalize_multi_col_sections: bool = True,
+        cleanup_tiny_tables: bool = True,
+        explicit_page_breaks: bool = False,
         recover_missing_images: bool = False,
         rasterize_vector_graphics: bool = False,
+        skip_images: bool = False,
+        skip_tables: bool = False,
     ) -> ConversionResult:
         """Convert PDF to DOCX.
 
@@ -230,6 +250,11 @@ class Converter:
                 "cpu_count": cpu_count,
             }
         )
+        # addresses upstream #267 / #274
+        if skip_tables:
+            settings["parse_lattice_table"] = False
+            settings["parse_stream_table"] = False
+            settings["extract_stream_table"] = False
 
         output_path = _resolve_output(output, self._input)
 
@@ -248,6 +273,10 @@ class Converter:
             "extract_hf": extract_headers_footers_to_section,
             "consolidate": consolidate_adjacent_runs,
             "collapse_empty": collapse_empty_paras,
+            "normalize_sections": normalize_multi_col_sections,
+            "cleanup_tiny_tables": cleanup_tiny_tables,
+            "explicit_page_breaks": explicit_page_breaks,
+            "skip_images": skip_images,
             "recover_missing": recover_missing_images,
             "rasterize_vectors": rasterize_vector_graphics,
         }
@@ -299,14 +328,51 @@ class Converter:
         pages: Iterable[int] | None = None,
         start: int = 0,
         end: int | None = None,
-    ) -> list[list[list[str | None]]]:
+        with_titles: bool = False,
+    ) -> list[list[list[str | None]]] | list[dict[str, Any]]:
+        """Extract tables. If `with_titles=True`, return dicts with 'title'
+        (the nearest-above text block) and 'cells' (2D list).
+        Addresses upstream #311.
+        """
         settings = dict(self._inner.default_settings)
         settings.update(_profile_settings("fidelity"))
         page_list = list(pages) if pages is not None else None
         try:
-            return self._inner.extract_tables(start=start, end=end, pages=page_list, **settings)
+            tables = self._inner.extract_tables(start=start, end=end, pages=page_list, **settings)
         except Exception as e:
             raise ParseError(f"extract_tables failed: {e}") from e
+        if not with_titles:
+            return tables
+        return [{"title": self._find_table_title(t), "cells": t} for t in tables]
+
+    def _find_table_title(self, table: list[list[Any]]) -> str | None:
+        """Best-effort: find the paragraph just before the table in its page."""
+        for page in self._inner.pages:
+            if not getattr(page, "finalized", False):
+                continue
+            blocks = self._collect_blocks(page)
+            for i, block in enumerate(blocks):
+                if not hasattr(block, "rows"):
+                    continue
+                if not _table_matches(block, table):
+                    continue
+                # search backward for closest text block
+                for prev in reversed(blocks[:i]):
+                    if hasattr(prev, "lines"):
+                        return _block_plain_text(prev)[:200] or None
+                return None
+        return None
+
+    @staticmethod
+    def _collect_blocks(page: Any) -> list[Any]:
+        out: list[Any] = []
+        for section in getattr(page, "sections", []) or []:
+            for column in section:
+                blocks = getattr(column, "blocks", None)
+                if blocks is None:
+                    continue
+                out.extend(blocks)
+        return out
 
     # -- internals -------------------------------------------------------
 
@@ -437,6 +503,48 @@ class Converter:
                             result.empty_paragraphs_removed = removed
                     except Exception as e:
                         _log.debug("empty-paragraph collapse skipped: %s", e)
+                if pp.get("normalize_sections"):
+                    try:
+                        normalized = normalize_multi_column_sections(doc)
+                        if normalized:
+                            dirty = True
+                            result.multi_col_sections_normalized = normalized
+                        clamped = clamp_paragraph_spacing(doc)
+                        if clamped:
+                            dirty = True
+                            result.spacing_clamped = clamped
+                        margin_fixes = fix_page_margins(doc)
+                        if margin_fixes:
+                            dirty = True
+                    except Exception as e:
+                        _log.debug("section normalization skipped: %s", e)
+                if pp.get("cleanup_tiny_tables"):
+                    try:
+                        merged = merge_consecutive_single_row_tables(doc)
+                        if merged:
+                            dirty = True
+                            result.tables_merged = merged
+                        unwrapped = unwrap_tiny_tables(doc)
+                        if unwrapped:
+                            dirty = True
+                            result.tiny_tables_unwrapped = unwrapped
+                    except Exception as e:
+                        _log.debug("tiny table cleanup skipped: %s", e)
+                if pp.get("explicit_page_breaks"):
+                    try:
+                        inserted = insert_page_breaks(doc)
+                        if inserted:
+                            dirty = True
+                            result.page_breaks_inserted = inserted
+                    except Exception as e:
+                        _log.debug("page-break insertion skipped: %s", e)
+                if pp.get("skip_images"):
+                    try:
+                        removed = _strip_images(doc)
+                        if removed:
+                            dirty = True
+                    except Exception as e:
+                        _log.debug("image strip skipped: %s", e)
                 if dirty:
                     doc.save(output_path)
             except Exception as e:
@@ -535,6 +643,37 @@ def _resolve_output(
         out.mkdir(parents=True, exist_ok=True)
         return str(out / (Path(input_path).stem + ".docx"))
     return str(out)
+
+
+def _table_matches(block: Any, cells: list[list[Any]]) -> bool:
+    try:
+        rows = list(block.rows)
+    except Exception:
+        return False
+    return len(rows) == len(cells)
+
+
+def _block_plain_text(block: Any) -> str:
+    parts: list[str] = []
+    for line in getattr(block, "lines", []) or []:
+        for span in getattr(line, "spans", []) or []:
+            t = getattr(span, "text", None)
+            if t:
+                parts.append(t)
+    return "".join(parts).strip()
+
+
+def _strip_images(document: Any) -> int:
+    """Remove every <w:drawing> from the body. Returns count removed."""
+    from docx.oxml.ns import qn as _qn
+
+    removed = 0
+    for d in list(document.element.body.iter(_qn("w:drawing"))):
+        parent = d.getparent()
+        if parent is not None:
+            parent.remove(d)
+            removed += 1
+    return removed
 
 
 def _profile_settings(profile: str) -> dict[str, Any]:

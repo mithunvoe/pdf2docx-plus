@@ -20,6 +20,19 @@ from __future__ import annotations
 
 from .headers_footers import extract_headers_footers
 from .lists import apply_lists
+from .page_breaks import insert_page_breaks
+from .sections import clamp_paragraph_spacing, fix_page_margins, normalize_multi_column_sections
+from .tables_cleanup import merge_consecutive_single_row_tables, unwrap_tiny_tables
 from .whitespace import collapse_empty_paragraphs
 
-__all__ = ["apply_lists", "collapse_empty_paragraphs", "extract_headers_footers"]
+__all__ = [
+    "apply_lists",
+    "clamp_paragraph_spacing",
+    "collapse_empty_paragraphs",
+    "extract_headers_footers",
+    "fix_page_margins",
+    "insert_page_breaks",
+    "merge_consecutive_single_row_tables",
+    "normalize_multi_column_sections",
+    "unwrap_tiny_tables",
+]
