@@ -1,0 +1,32 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# bench outputs
+bench/reports/outputs/
+bench/reports/*.json
+!bench/reports/.gitkeep
+
+# legacy upstream patterns
+*.jp*g
+layout.json
+.vscode/
+test/issues/
+test/features/
+test/outputs/
+diff.png
+pdf2docx*.rst
+
+.env
+.DS_Store

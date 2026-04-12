@@ -1,0 +1,107 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf2docx-plus"
+version = "0.6.0a4"
+description = "Hardened PDF->DOCX converter. Fork of pdf2docx with stability fixes, typed API, plugin architecture, and optional ML layout/OCR/table backends."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "pdf2docx-plus maintainers" }]
+keywords = ["pdf", "docx", "word", "convert", "ocr", "table"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing :: Markup",
+]
+dependencies = [
+    "PyMuPDF>=1.24.0",
+    "python-docx>=1.1.0",
+    "fonttools>=4.24.0",
+    "numpy>=1.24.0",
+    "opencv-python-headless>=4.8",
+    "fire>=0.5.0",
+    "typing-extensions>=4.10",
+]
+
+[project.optional-dependencies]
+rest = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "python-multipart>=0.0.9"]
+bench = ["apted>=1.0.3", "scikit-image>=0.22", "scipy>=1.11", "pillow>=10.0"]
+ml-tables = ["torch>=2.2", "transformers>=4.40", "timm>=0.9"]
+ml-layout = ["torch>=2.2", "transformers>=4.40"]
+ml-formula = ["torch>=2.2", "pix2tex>=0.1.4"]
+ml-ocr = ["paddleocr>=2.7", "paddlepaddle>=2.6"]
+all = ["pdf2docx-plus[rest,bench]"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "pytest-timeout>=2.2",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pre-commit>=3.6",
+    "types-setuptools",
+]
+
+[project.urls]
+Homepage = "https://github.com/makebell/pdf2docx-plus"
+Issues = "https://github.com/makebell/pdf2docx-plus/issues"
+Upstream = "https://github.com/ArtifexSoftware/pdf2docx"
+
+[project.scripts]
+pdf2docx-plus = "pdf2docx_plus.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pdf2docx_plus", "pdf2docx"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "pdf2docx_plus",
+    "pdf2docx",
+    "README.md",
+    "LICENSE",
+    "LICENSING.md",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["pdf2docx/gui"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"pdf2docx/**" = ["UP", "B", "SIM", "RUF", "E", "F", "W", "I"]
+"tests/**" = ["B"]
+"bench/**" = ["B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_unused_configs = true
+files = ["pdf2docx_plus"]
+exclude = ["pdf2docx/"]
+
+[[tool.mypy.overrides]]
+module = ["fitz", "docx.*", "cv2", "fire", "fontTools.*", "apted", "skimage.*", "paddleocr.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+markers = [
+    "unit: fast isolated tests",
+    "integration: end-to-end conversion tests (use small fixtures)",
+    "bench: benchmarks against corpus (slow)",
+    "ml: requires optional ML dependencies",
+]
+timeout = 120

@@ -1,0 +1,653 @@
+PRODUCT KEY FACTS
+Bosera Global Exchange Traded Funds Series Open-ended Fund Company
+Bosera USD Money Market ETF (Tokenised Class)
+[*] 2024
+Issuer: Bosera Asset Management (International) Co., Limited
+
+This statement provides you with key information about this product.
+
+This statement is a part of the Sub-Fund’s Prospectus. 
+
+You should not invest in this product based on this statement alone.
+Quick facts
+Manager: 
+Bosera Asset Management (International) Co., Limited
+Custodian:
+BOCI-Prudential Trustee Limited
+Ongoing charges over a year#:
+Class T USD Shares: estimated to be [*]%
+Dealing frequency: 
+Daily (Hong Kong business days)
+Base currency:
+US dollars (USD)
+Dividend policy:
+The Manager has discretion as to whether or not the Sub-Fund will 
+make any distribution of dividends, the frequency of distribution and 
+amount of dividends. There is no guarantee of regular distribution nor, 
+where distribution is made, the amount being distributed. Dividends 
+may be paid out of capital or effectively out of capital of the relevant 
+Class and may result in an immediate reduction of the Net Asset Value 
+(“NAV”) per share of the Sub-Fund (“Share”).
+All Shares will receive distributions in the base currency (USD) only.
+Financial year end of the Sub-Fund:
+31 December
+Minimum initial investment: 
+Class T USD: USD 1
+Minimum subsequent investment:
+Class T USD: USD 0.1
+#    The ongoing charges figure is indicative only as the Sub-Fund is newly set up. It represents the sum of the estimated ongoing expenses over a 12-month period  
+chargeable to the relevant Class expressed as a percentage of the NAV of the relevant Class. The actual figure may be different from this estimated figure and it may vary 
+from year to year. 
+What is this product? 
+Bosera USD Money Market ETF (the “Sub-Fund”) is a sub-fund of the Bosera Global Exchange Traded Funds Series Open-
+Ended Fund Company (“Company”), which is a public umbrella open-ended fund company established under Hong Kong 
+law with variable capital with limited liability and segregated liability between sub-funds. The Sub-Fund is an actively 
+managed exchange traded fund under Chapters 8.2 and 8.10 of the Code on Unit Trusts and Mutual Funds (the “Code”).
+The Sub-Fund offers both tokenised Class of Shares and non-tokenised Class(es) of Shares. Tokenised Class of Shares is 
+not listed on The Stock Exchange of Hong Kong Limited (the “SEHK”). This statement contains information about the 
+offering of the tokenised Class of Shares, and unless otherwise specified references to “Shares” in this statement shall 
+refer to the tokenised Class of Shares. Investors should refer to a separate statement for the offering of the non-
+tokenised Class(es) of Shares.  
+The purchase of a Share in the Sub-Fund is not the same as placing funds on deposit with a bank or deposit-taking 
+company. The Sub-Fund does not guarantee repayment of principal and the Manager has no obligation to redeem the 
+Shares at the offer value. The Sub-Fund does not have a constant NAV. The Sub-Fund is not subject to the supervision of 
+
+the Hong Kong Monetary Authority.
+Objectives and Investment Strategy
+Objective
+The Sub-Fund’s objective is to invest in short term deposits and high quality money market investments. The Sub-Fund 
+seeks to achieve a return in USD in line with prevailing money market rate. There can be no assurance that the Sub-Fund 
+will achieve its investment objective.
+Strategy
+The Sub-Fund seeks to achieve its investment objective by investing primarily (i.e. not less than 70% of its NAV) in USD-
+denominated  short-term  deposits  and  high  quality  money  market  instruments  issued  by  governments,  quasi-
+governments, international organisations, financial institutions and corporations. The Sub-Fund may invest up to 30% of its 
+NAV in non USD-denominated short-term deposits and high quality money market instruments. The Manager will hedge 
+non USD-denominated investments into USD in order to manage any material currency risk.
+Short-term Deposits and High Quality Money Market Instruments
+In assessing whether a money market instrument is of high quality, at a minimum, the credit quality and the liquidity 
+profile of the instrument must be taken into account. High quality money market instruments include fixed income 
+securities, commercial papers, certificates of deposits, short-term notes and commercial bills. The Sub-Fund may invest up 
+to 100% of its NAV in fixed income securities, which may include but are not limited to government bonds, fixed and  
+floating rate bonds.
+The Sub-Fund will only invest in fixed income securities rated investment grade or above. For the purposes of the Sub-
+Fund, investment grade is defined as below based on the original maturity of a fixed income security:
+• A long-term fixed income security which (or the issuer of which) is rated BBB- / Baa3 or above by an internationally 
+recognised credit rating agency (such as Fitch’s, Moody’s and Standard & Poor’s) or rated AA+ or above by a Mainland 
+China credit rating agency. For split credit ratings, the highest rating shall apply. For the avoidance of doubt, the Sub-
+Fund does not intend to invest in fixed income securities with a long term to maturity remaining at the time of 
+investment. The long-term credit ratings will be considered where the Sub-Fund invests in fixed income securities which 
+have been rated long-term credit ratings, but have a shorter term to maturity remaining (subject to the restrictions on 
+remaining maturity, weighted average maturity and weighted average life of the portfolio of the Sub-Fund as set out 
+below) at the time of purchase by the Sub-Fund; and
+• A short-term fixed income security which (or the issuer of which) is rated F3 / P-3 / A-3 or above by an internationally 
+recognised credit rating agency (such as Fitch’s, Moody’s and Standard & Poor’s) or rated A-1 or above by a Mainland 
+China credit rating agency. For split credit ratings, the highest rating shall apply.
+For investment grade (either the security or its issuer) fixed income securities, the Manager will assess the credit risks of 
+the fixed income security on an ongoing basis based on quantitative and qualitative fundamentals, including but not 
+limited to the issuer's leverage, operating margin, return on capital, interest coverage, operating cash flows, industry 
+outlook, the firm's competitive position and corporate governance etc. to ensure that the fixed income security that the 
+Sub-Fund invests in is of sound credit quality.
+The Manager will assess the liquidity profile of instruments based on, amongst other factors, time to cash, external 
+liquidity classification, liquidation horizon, daily trading volume, price volatility and bid-ask spread of such instruments. 
+Only instruments with sufficient liquidity will be included in the portfolio of the Sub-Fund. 
+There is no specific geographical allocation of the country of issue of the high quality money market instruments or short-
+term deposits. Countries or regions in which the Sub-Fund may invest in include the United States, Singapore, the 
+European Union and Greater China (comprising Mainland China, Hong Kong, Macau and Taiwan). The Sub-Fund may invest 
+in aggregate up to 100% of its NAV in Greater China. The Sub-Fund will invest less than 20% of its NAV in emerging markets 
+other than Mainland China.
+The Sub-Fund may invest in aggregate no more than 15% of its NAV in onshore China fixed income securities, such as 
+government bonds, policy bank bonds, negotiable certificates of deposits, via Bond Connect (as defined in the Prospectus), 
+the Manager’s QFI status or in the Mainland Inter-bank Bond Market via Foreign Access Regime (as defined in the 
+Prospectus). 
+The aggregate value of the Sub-Fund’s holding of instruments and deposits issued by a single entity will not exceed 10% of 
+the total NAV of the Sub-Fund except: (i) where the entity is a substantial financial institution and the total amount does 
+not exceed 10% of the entity’s share capital and non-distributable capital reserves, the limit may be increased to 25%; or 
+
+(ii) in the case of Government and other Public Securities, up to 30% may be invested in the same issue; or (iii) in respect of 
+any deposit of less than USD1,000,000 or its equivalent in the base currency of the Sub-Fund, where the Sub-Fund cannot 
+otherwise diversify as a result of its size. 
+The Sub-Fund will maintain a portfolio with weighted average maturity not exceeding 60 days and a weighted average life 
+not exceeding 120 days and must not purchase an instrument with a remaining maturity of more than 397 days, or two 
+years in the case of Government and other Public Securities.
+The Sub-Fund will not invest in any convertible bonds or instruments with loss absorption features, or any urban 
+investment bonds.
+Sale and Repurchase Transactions, Reverse Repurchase Transactions and Borrowing
+The Sub-Fund may borrow up to 10% of its latest available NAV but only on a temporary basis for the purpose of meeting 
+redemption requests or defraying operating expenses.
+The Sub-Fund may enter into sale and repurchase transactions for up to 10% of its NAV but only on a temporary basis for 
+the purpose of meeting redemption requests or defraying operating expenses. The amount of cash received by the Sub-
+Fund under such transactions may not in aggregate exceed 10% of its NAV.
+The Sub-Fund may engage in reverse repurchase transactions (i.e. a transaction whereby the Sub-Fund purchases 
+securities from a counterparty of sale and repurchase transactions and agrees to sell such securities back at an pre-
+determined price in the future) provided that the aggregate amount of cash provided to the same counterparty in reverse 
+repurchase agreements may not exceed 15% of the NAV of the Sub-Fund.
+Save as disclosed above, the Sub-Fund currently does not intend to enter into any securities lending transactions or other 
+similar over-the-counter transactions.
+Other Investments
+The Sub-Fund may invest up to 10% of its NAV in money market funds authorised in Hong Kong by the SFC under Chapter 
+8.2 of the Code or regulated in other jurisdictions in a manner generally comparable with the requirements of the SFC and 
+acceptable to the SFC.
+The Sub-Fund may invest up to 15% of its NAV in asset backed securities, such as mortgage backed securities. Such asset 
+backed securities will be issued in regions such as Mainland China, Hong Kong, Singapore or the United States, and will be 
+rated investment grade or above.
+The Sub-Fund will enter into financial derivative instruments (including interest rate swaps and currency swaps) for 
+hedging purposes only. 
+Use of derivatives / Investment in derivatives
+The Sub-Fund’s net derivative exposure may be up to 50% of the Sub-Fund’s NAV. 
+
+Tokenisation of Shares
+The  blockchain  provider  appointed  by  the  Manager has  adopted  a  distributed  ledger  technology  (consisting  of 
+[Ethereum] smart contracts) to create a digital platform (“Digital Platform”) on which: 
+1.
+end investors’ beneficial ownership of Class T Shares will be recorded and represented in the form of digital tokens 
+(“Tokens”);
+2.
+basic information and key facts of the Sub-Fund, including, but not limited to, the investment objective, 
+fundamental details, NAV per Class T Share, performance metrics, offering documents, announcement and 
+notices, will be uploaded by the Manager and made available to investors as Token holders; and
+3.
+transaction data relating to the subscription and redemption of Class T Shares (e.g. subscription and/or 
+redemption amount and Shares, and payment records of subscription amount etc.) will be uploaded by the 
+Manager for validation and processing by the Custodian.
+Notwithstanding the use of distributed ledger technology (in that the transaction data of tokenised Shares are recorded 
+on-chain), the settlement finality (i.e. the point where a transaction is considered as finally settled) is performed off-chain 
+in that, cash settlement for the subscription of tokenised Shares is performed off-chain, and Shares (as represented by the 
+Tokens) are issued in registered form and recorded in the Register of Shareholders maintained by the Registrar off-chain. 
+The record of ownership of tokenised Shares is under the full and complete control of the Manager and the Manager 
+maintains controls to correct errors or unauthorized transactions on the  Digital Platform (e.g. by adding additional 
+instructions to rectify the error or unauthorized transaction).
+For the avoidance of doubt, Class T Shares are created in the same manner as Shares of other Classes of the Sub-Fund and, 
+save as otherwise provided in the Prospectus, a tokenised Share shall have exactly the same rights as a non-tokenised 
+Share.
+Investors can subscribe for, or redeem, Class T Shares in the form of Tokens via eligible distributors*. In doing so, investors 
+will need to open a digital wallet (to house the Tokens) and fiat currency settlement account in the class currency of the 
+relevant tokenised Shares (to house subscription moneys and redemption proceeds) with their eligible distributors.
+Tokenised Shares are currently not permitted for trading on any secondary markets.
+* An eligible distributor in respect of Class T Shares means an SFC-licensed virtual asset trading platform or any distributor 
+licensed by the SFC to carry on Type 1 regulated activity (dealing in securities) for virtual assets. 
+What are the key risks? 
+Investment involves risks. Please refer to the Prospectus for details including the risk factors. 
+1.
+Risks associated with tokenised Class of Shares [Deacons: The following is based on the draft Prospectus. Please 
+review and enhance where appropriate.] 
+
+Risk associated with virtual asset trading platforms – The virtual asset trading platforms on which tokenised Shares in 
+the Sub-Fund may be traded are relatively newly established. The use of virtual asset trading platforms may expose 
+investors to, amongst other things, counterparty risks of the platform operators and liquidity risks whereby demand of 
+the tokenised Shares of the Sub-Fund may be limited and such platforms may impose limits or restrictions on which 
+moneys deposited in such platforms can be withdrawn. Furthermore, virtual asset trading platforms are also common 
+targets of cybercriminals. 
+Blockchain technology risk – The blockchain technology is relatively new and is subject to a various threats or risks 
+that can adversely impact the Sub-Fund. Notwithstanding the fact that blockchains are secured by means of 
+cryptography, there is a possibility that such security measures can be compromised (for example, blockchain systems 
+can be susceptible to generic network attacks and phishing attacks) and thereby resulting in the unauthorized 
+alteration of the blockchain that may disrupt the operation of the Sub-Fund. There is also a risk of undiscovered 
+technical flaws associated with systems utilizing blockchain technology.
+
+Virtual asset security risk – The loss or theft of the private key of an investor will compromise such investor’s digital 
+wallet and expose the investor to risk of misappropriation of  digital assets or inability to access  digital assets 
+associated with the wallet.
+
+Cybersecurity risk – The Digital Platform contains the complete transaction history of the tokenised Shares and the 
+data on the blockchain utilised is available to the public. As a result, certain information other than personal 
+identifying information may be publicly accessible by way of tools that are capable of displaying activity on the 
+blockchain. Personal identifying information is maintained separately by the Manager and the blockchain provider not 
+available to the public. However, in the case of data security breaches where such personal identifying information is 
+exposed to the public, such information can be used to determine a Shareholder’s identity and investing history in the 
+
+Sub-Fund.
+While each of the Manager and the blockchain provider has put in place adequate policies and measures to counter 
+cybersecurity risks, such policies and measures cannot provide absolute security. The techniques used to obtain 
+unauthorised access to data and information change frequently and may be difficult to detect for long periods of time. 
+Hardware or software acquired from third parties may also contain defects in design or manufacture or other problems 
+that can unexpectedly compromise information security.
+
+Delay risk  – Delays in transaction processing can occur on the blockchain utilised for the tokenised Shares. For 
+example, delays can occur when computers on the network are unable to reach a consensus on transactions on the 
+blockchain. During a delay, it will not be possible to record transactions in the Shares on the blockchain and thereby 
+impacting investors’ ability to subscribe or redeem the tokenised Shares. Investors can select to subscribe in non-
+tokenised Classes of Shares of the Sub-Fund if delay risk occurs. Delay risk may have adverse impact on both 
+subscription and redemption processes of the tokenised Shares and investors’ receipt of tokenised Shares or 
+redemption proceeds may be delayed. 
+
+Dependence on service providers  – The Manager and the Sub-Fund rely on various parties to facilitate the 
+administration and offering of the tokenised Shares through the use of blockchain and blockchain-related technology 
+and maintain the relevant operating infrastructure. Such operations may be adversely impacted if any such party 
+ceases to provide the relevant services. 
+
+Regulatory risk – As the use of blockchain technology is relatively new, Hong Kong regulations regarding blockchain 
+may change drastically in a short period of time that may negatively impact the operation of the Sub-Fund in relation 
+to the administration and offering of the tokenised Shares.]
+2.
+Investment risk
+
+The Sub-Fund’s investment portfolio may fall in value due to any of the key risk factors below and therefore your 
+investment in the Sub-Fund may suffer losses. There is no guarantee of the repayment of principal.
+3.
+Active investment management risk
+
+The Manager employs an actively managed investment strategy for the Sub-Fund. The Sub-Fund does not seek to 
+track any index or benchmark, and there is no replication or representative sampling conducted by the Manager. It 
+may fail to meet its objective as a result of the Manager’s selection of investments, and/or the implementation of 
+processes which may cause the Sub-Fund to underperform as compared to prevailing money market rates or other 
+money market funds with a similar objective.
+4.
+Emerging market risk, Mainland China investment risk and concentration risk
+
+The Sub-Fund will invest in emerging markets such as Mainland China, which are subject to higher risks (for example, 
+liquidity risk, currency risk, political risk, regulatory risk, legal and taxation risks, settlement risk, custody risk and 
+economic risk) and higher volatility than more developed markets. Some emerging markets securities may be subject 
+to brokerage or stock transfer taxes levied by governments, which would have the effect of increasing the cost of 
+investment and which may reduce the realised gain or increase the loss on such securities at the time of sale.
+
+Investing in Mainland China, involves a greater risk of loss than investing in more developed markets due to, among  
+other factors, greater political, social, tax, economic, foreign exchange, liquidity and regulatory risks; exchange rate 
+fluctuations and exchange control; less developed settlement system; governmental interference; the risk of 
+nationalisation and expropriation of assets, and custody risk and high volatility risk. 
+
+The Sub-Fund will invest primarily in USD-denominated short-term deposits and high quality money market 
+instruments (which may include fixed income securities). The Sub-Fund may also be concentrated in a particular 
+market or region, including Greater China. The Sub-Fund is therefore likely to be more volatile than a broad-based 
+fund that adopts a more diversified strategy. The value of the Sub-Fund may be more susceptible to adverse 
+economic, political, policy, foreign exchange, liquidity, tax, legal or regulatory events affecting the USD money 
+markets, or the market or region in which its investments are focused.
+5.
+Fixed income securities investment risk
+
+Short-term fixed income instruments risk
+ 
+  - As the Sub-Fund invests substantially in short-term fixed income 
+instruments with short maturities, the turnover rates of the Sub-Fund’s investments may be relatively high and the 
+transaction costs incurred as a result of the purchase or sale of short-term fixed income instruments may also increase 
+which in turn may have a negative impact on the NAV of the Sub-Fund. The Sub-Fund’s underlying fixed income 
+securities may become more illiquid when nearing maturity. It therefore may be more difficult to achieve fair 
+valuation in the market.
+
+Credit / counterparty risk
+ 
+  - The Sub-Fund is exposed to the credit/default risk of issuers of the fixed income securities it 
+invests in.
+
+Volatility and liquidity risk
+ 
+  - The fixed income securities in the Greater China markets (in particular Mainland China and 
+
+Taiwan) and other emerging markets may be subject to higher volatility and lower liquidity compared to more 
+developed markets. The prices of securities traded in such markets may be subject to fluctuation. The bid and offer 
+spreads of the price of such securities may be large and the Sub-Fund may incur significant trading costs.
+
+Interest rate risk
+ 
+  – Investment in the Sub-Fund is subject to interest rate risk. Generally, the prices of fixed income 
+securities rise when interest rates fall, whilst their prices fall when interest rates rise.
+
+Credit rating risk
+ 
+  - Credit ratings assigned by rating agencies are subject to limitations and do not guarantee the 
+creditworthiness of the security and/or issuer at all times.
+
+Credit rating agency Risk
+ 
+  - The credit appraisal system in Mainland China and the rating methodologies employed in 
+Mainland China may be different from those employed in other markets. Credit ratings given by Mainland China rating 
+agencies may therefore not be directly comparable with those given by other international rating agencies.
+
+Downgrading risk
+ 
+  – The credit rating of a fixed income instrument or its issuer may subsequently be downgraded. In 
+such case, the Sub-Fund’s investment value may be adversely affected. The Manager may or may not be able to 
+dispose of the fixed income instruments that are being downgraded.
+
+Valuation risk
+ 
+  - Valuation of the Sub-Fund’s investments may involve uncertainties and judgmental determinations. If 
+such valuation turns out to be incorrect, this may affect the NAV calculation of the Sub-Fund.
+
+Sovereign debt risk 
+ 
+ - The Sub-Fund’s investment in securities issued or guaranteed by governments may be exposed to 
+political, social and economic risks. In adverse situations, the sovereign issuers may not be able or willing to repay the 
+principal and/or interest when due or may request the Sub-Fund to participate in restructuring such debts. The Sub-
+Fund may suffer significant losses when there is a default of sovereign debt issuers.
+6.
+Risks associated with bank deposits
+
+Bank deposits are subject to the credit risks of the relevant financial institutions. The Sub-Fund may also place deposits 
+in non-resident accounts (NRA) and offshore accounts (OSA), which are offshore deposits with offshore branches of 
+Mainland Chinese banks. The Sub-Fund’s deposit may not be protected by any deposit protection schemes, or the 
+value of the protection under the deposit protection schemes may not cover the full amount deposited by the Sub-
+Fund. Therefore, if the relevant financial institution defaults, the Sub-Fund may suffer losses as a result.
+7.
+Eurozone risk
+
+In light of ongoing concerns on the sovereign debt risk of certain countries within the Eurozone, the Sub-Fund’s 
+investments in the region may be subject to higher volatility, liquidity, currency and default risks. Any adverse events, 
+such as credit downgrade of a sovereign or exit of members of the European Union from the Eurozone, may have a  
+negative impact on the value of the Sub-Fund.
+8.
+Differences in dealing arrangements between Listed and Unlisted Classes of Shares
+
+Tokenised Class of Shares is not listed on the SEHK and is therefore a type of unlisted classes of Shares of the Sub-Fund 
+(“Unlisted Classes of Shares”). Listed Class of Shares of the Sub-Fund (“Listed Class of Shares”) are listed on the SEHK 
+and are traded on the SEHK like listed stocks.
+
+Investors of Listed and Unlisted Classes of Shares are subject to different pricing and dealing arrangements. The NAV 
+per Share of each of the Listed and Unlisted Classes of Shares may be different due to different fees and cost applicable 
+to each class. The trading hours of the SEHK applicable to the Listed Class of Shares in the secondary market and the 
+dealing deadlines in respect of the Unlisted Classes of Shares are also different. For the avoidance of doubt, the 
+dealing deadline applicable to the Listed Class of Shares in the primary market and the dealing deadlines in respect of 
+the Unlisted Classes of Shares are the same.
+
+Shares of the Listed Class of Shares are traded on the stock exchange in the secondary market on an intraday basis at 
+the prevailing market price (which may diverge from the corresponding NAV), while Shares of the Unlisted Classes of 
+Shares are sold through intermediaries based on the dealing day-end NAV and are dealt at a single valuation point 
+with no access to intraday liquidity in an open market. Depending on market conditions, investors of the Unlisted 
+Classes of Shares may be at an advantage or disadvantage compared to investors of the Listed Class of Shares.
+
+In a stressed market scenario, investors of the Unlisted Classes of Shares could redeem their Shares at NAV while 
+investors of the Listed Class of Shares in the secondary market could only redeem at the prevailing market price (which 
+may diverge from the corresponding NAV) and may have to exit the Sub-Fund at a significant discount. On the other 
+hand, investors of the Listed Class of Shares could sell their Shares on the secondary market during the day thereby 
+crystallising their positions while investors of the Unlisted Classes of Shares could not do so in a timely manner until 
+the end of the day.
+9.
+Currency risks
+
+Underlying investments of the Sub-Fund may be denominated in currencies other than its base currency. The NAV of 
+the Sub-Fund may be affected unfavourably by fluctuations in the exchange rates between these currencies and the 
+base currency and by changes in exchange rate controls.
+
+10. Distributions out of or effectively out of capital risk
+
+Payment of distributions out of capital or effectively out of capital amounts to a return or withdrawal of part of an  
+investor’s original investment or from any capital gains attributable to that original investment. Any such distributions 
+may result in an immediate reduction in the NAV per Share of the Sub-Fund.
+11. Termination risks
+
+The Sub-Fund may be terminated early under certain circumstances, for example, if the size of the Sub-Fund falls 
+below USD 10,000,000 (or equivalent). Investors may not be able to recover their investments and suffer a loss when 
+the Sub-Fund is terminated.
+How has the Sub-Fund performed? 
+Since the Sub-Fund is newly set up, there is insufficient data to provide a useful indication of past performance to investors.
+Is there any guarantee? 
+The Sub-Fund does not have any guarantees. You may not get back the full amount of money you invest.
+What are the fees and charges? 
+Charges which may be payable by you
+You may have to pay the following fees when dealing in the Shares of the Sub-Fund.
+Fee
+What you pay
+Class T
+Subscription fee#
+Up to [1]% of the subscription amount
+Switching fee (i.e. conversion fee)
+Not applicable (switching is not permitted in respect of Class T Shares)
+Redemption fee#
+Nil
+Ongoing fees payable by the Sub-Fund 
+The following expenses are paid out of the Sub-Fund. They affect you because they reduce the return you get on your 
+investments.
+Fee
+Annual rate (as a % of the Sub-Fund’s NAV)
+Class T USD
+Management fee# 
+[0.15]% per annum 
+Performance fee
+Nil
+Custodian  fee  and 
+administration fee#
+Currently: Up to 0.075% per annum of the NAV of the Sub-Fund, subject to a monthly 
+minimum fee of up to USD4,500
+Other fees
+You may have to pay other fees when dealing in the Shares of the Sub-Fund.
+#  Please note that some fees may be increased up to a permitted maximum amount by providing one month’s prior notice 
+to Shareholders. Please refer to the section headed “Expenses and Charges” in the Prospectus for further details of the 
+fees and charges payable and the permitted maximum of such fee allowed, as well as other ongoing expenses that may 
+be borne by the Sub-Fund.
+Additional information 
+You generally buy and redeem Shares at the Sub-Fund’s next-determined NAV after the Custodian receives your request, 
+directly or via a distributor, in good order at or before 12:00 p.m. (Hong Kong time), being the Sub-Fund’s dealing cut-off 
+time on each dealing day of the Sub-Fund. Different distributor(s) or virtual asset trading platform(s) on which tokenised 
+Shares of the Sub-Fund are offered may impose different dealing deadlines for receiving requests from investors. Before 
+
+placing your subscription or redemption orders, please check with your distributor or virtual asset trading platform for 
+their internal dealing cut-off time (which may be earlier than the Sub-Fund’s dealing cut-off time). The valuation point is at 
+approximately 1:00 p.m. (Hong Kong time) on the applicable valuation day (which coincides with each dealing day).
+For further information on the tokenisation process and the use of blockchain technology of the tokenised Class of Shares 
+and the subscription and redemption procedures of tokenised Class of Shares, please refer to the Prospectus.
+The Manager will publish important news and information in respect of the Sub-Fund, in both English and Chinese 
+languages (unless otherwise specified) at the following website www.bosera.com.hk (this website has not been reviewed 
+by the SFC), including:
+
+the Prospectus and this Product Key Facts Statement (as amended and supplemented from time to time);
+
+the latest annual and semi-annual unaudited financial reports in English;
+
+any public announcements made by the Sub-Fund, including information in relation to the Sub-Fund, notices of 
+suspension of the issue and redemption of Shares, suspension of the calculation of the NAV and changes in fees;
+
+any notices relating to material changes to the Sub-Fund which may have an impact on its investors such as material 
+alterations or additions to the offering documents and constitutive documents of the Sub-Fund; 
+
+the last NAV and the last NAV per Share in USD;
+
+full portfolio information of the Sub-Fund (updated on a daily basis); 
+
+the past performance information of other classes offered to Hong Kong investors; 
+
+composition of distributions (i.e. the relative amounts paid out of (i) net distributable income and (ii) capital), if any, 
+for the last 12 months.
+The NAV of the Sub-Fund is calculated and the price of tokenised Classes of Shares are published each business day on the 
+website www.bosera.com.hk (this website has not been reviewed by the SFC) [and the Digital Platform].
+You may obtain information on the distributor(s) in respect of the Sub-Fund by contacting the Manager at 2537 6658.
+Important
+If you are in doubt, you should seek professional advice.
+The SFC takes no responsibility for the contents of this statement and makes no representation as to its accuracy or 
+completeness. SFC registration and authorization do not represent a recommendation or endorsement of the Company or 
+the Sub-Fund nor do they guarantee the commercial merits of the Company or the Sub-Fund or its performance. They do 
+not mean the Company or the Sub-Fund is suitable for all investors nor do they represent an endorsement of its suitability 
+for any particular investor or class of investors. 
+Fee
+What you pay
+Class A
+Class C
+Class N
+Class W
+Class I
+Class IF
+Class Z
+Subscription 
+fee  (Front-End 
+Load)
+Up to 6%
+Not applicable
+Up to 3%
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Switching fee 
+(Exchange fee)
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Redemption 
+fee
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Back-End 
+Load
+Not applicable
+1% 
+(within 12 
+months of 
+purchase)
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Annual Rate (as a % of the Fund’s value)
+Class A
+Class C
+Class N
+Class W
+Class I
+Class IF
+Class Z
+Management 
+fee
+1.00%
+1.00%
+1.00%
+0.75%
+0.70%
+0.45%
+Paid directly to 
+Manager or its 
+affiliate
+Depositary fee
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Performance 
+fee
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Administration 
+fee
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Included in 
+Other Fees
+Distribution fee
+Up to 0.75%
+Up to 1.00%
+Up to 1.25%
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+
+Service fee
+Not applicable
+Up to 0.50%
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Not applicable
+Other Fees1
+Up to 0.10%
+Up to  0.10%
+Up to 0.10%
+Up to 0.10%
+Up to 0.05%
+Up to 0.05%
+Up to 0.05%
+______________________________________________________________________________________
+__________________________
+How has the fund performed?
+A1USD
+MSCI All Country World Index (net div) (USD)
+-30
+-20
+-10
+0
+10
+20
+30
+40
+%
+Calendar 
+Year
+15*
+16*
+17
+18
+19
+20
+21
+22
+23
+24
+(2.1)
+3.3
+23.3
+(9.7)
+29.1
+13.2
+13.7
+(18.8)
+16.6
+12.7
+(2.4)
+7.9
+24.0
+(9.4)
+26.6
+16.3
+18.5
+(18.4)
+22.2
+17.5
+* The Fund’s investment strategy and name changed on 
+29 June 2016; performance shown above prior to this 
+date is representative of the Fund’s prior investment 
+strategy, and performance shown after this date is 
+representative  of  the  Fund’s  current  investment 
+strategy.
+Past performance is not indicative of future performance. 
+Investors may not get back the full amount invested. 
+The computation basis of the performance is based on 
+calendar year end, NAV-to-NAV, with dividends reinvested.
+These figures show by how much Class A1USD increased or 
+decreased in value during the calendar year being shown. This 
+class was selected by the Investment Manager as the most 
+appropriate representative share class because it is 
+denominated in the fund's base currency and is a primary 
+share class made available to retail Hong Kong investors. 
+Performance has been calculated in U.S. Dollars including 
+ongoing charges and excluding any subscription fee and 
+redemption fee you might have to pay.
+Performance of the Fund's benchmark, MSCI All Country 
+World Index (net div), is also shown.
+Fund launch date: 2005
+Share Class A1USD launch date: 2005
+______________________________________________________________________________________
+__________________________
