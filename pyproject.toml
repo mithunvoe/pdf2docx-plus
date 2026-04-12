@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pdf2docx-plus"
-version = "0.6.0a4"
+version = "0.6.0a5"
 description = "Hardened PDF->DOCX converter. Fork of pdf2docx with stability fixes, typed API, plugin architecture, and optional ML layout/OCR/table backends."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -32,7 +32,7 @@ from typing import IO, Any
 
 from . import fidelity  # noqa: F401  (install monkey-patches on import)
 from .consolidate import consolidate_runs
-from .emit import apply_lists, extract_headers_footers
+from .emit import apply_lists, collapse_empty_paragraphs, extract_headers_footers
 from .errors import (
     ConversionError,
     InputError,
@@ -41,6 +41,7 @@ from .errors import (
     PasswordRequired,
     TimeoutExceeded,
 )
+from .images import recover_images
 from .layout import detect_header_footer, detect_scanned_pages, normalise_list_blocks
 from .logging import get_logger, silence_upstream
 from .plugins import PluginRegistry
@@ -75,6 +76,9 @@ class ConversionResult:
     lists_emitted: int = 0
     headers_footers_detected: int = 0
     headers_footers_extracted: int = 0
+    empty_paragraphs_removed: int = 0
+    missing_rasters_recovered: int = 0
+    vector_regions_rasterized: int = 0
     peak_rss_mb: float | None = None
 
     @property
@@ -168,6 +172,9 @@ class Converter:
         apply_list_formatting: bool = True,
         extract_headers_footers_to_section: bool = False,
         consolidate_adjacent_runs: bool = True,
+        collapse_empty_paras: bool = True,
+        recover_missing_images: bool = True,
+        rasterize_vector_graphics: bool = False,
     ) -> ConversionResult:
         """Convert PDF to DOCX.
 
@@ -226,6 +233,9 @@ class Converter:
             "apply_lists": apply_list_formatting,
             "extract_hf": extract_headers_footers_to_section,
             "consolidate": consolidate_adjacent_runs,
+            "collapse_empty": collapse_empty_paras,
+            "recover_missing": recover_missing_images,
+            "rasterize_vectors": rasterize_vector_graphics,
         }
 
         t0 = time.perf_counter()
@@ -405,10 +415,34 @@ class Converter:
                             result.runs_merged = merged
                     except Exception as e:
                         _log.debug("run consolidation skipped: %s", e)
+                if pp.get("collapse_empty"):
+                    try:
+                        removed = collapse_empty_paragraphs(doc)
+                        if removed:
+                            dirty = True
+                            result.empty_paragraphs_removed = removed
+                    except Exception as e:
+                        _log.debug("empty-paragraph collapse skipped: %s", e)
                 if dirty:
                     doc.save(output_path)
             except Exception as e:
                 _log.debug("post-emit transforms skipped: %s", e)
+
+            # Step 5: image / vector recovery directly on the saved DOCX
+            if (pp.get("recover_missing") or pp.get("rasterize_vectors")) and self._input:
+                try:
+                    rep = recover_images(
+                        self._input,
+                        output_path,
+                        rasterize_vectors=bool(pp.get("rasterize_vectors")),
+                        recover_missing_rasters=bool(pp.get("recover_missing")),
+                    )
+                    result.missing_rasters_recovered = rep.missing_raster_recovered
+                    result.vector_regions_rasterized = rep.vector_regions_rasterized
+                    if rep.warnings:
+                        result.warnings.extend(rep.warnings)
+                except Exception as e:
+                    _log.debug("image recovery skipped: %s", e)
 
         # peak RSS (best-effort; Unix only)
         try:

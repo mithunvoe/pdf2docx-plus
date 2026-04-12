@@ -20,5 +20,6 @@ from __future__ import annotations
 
 from .headers_footers import extract_headers_footers
 from .lists import apply_lists
+from .whitespace import collapse_empty_paragraphs
 
-__all__ = ["apply_lists", "extract_headers_footers"]
+__all__ = ["apply_lists", "collapse_empty_paragraphs", "extract_headers_footers"]
