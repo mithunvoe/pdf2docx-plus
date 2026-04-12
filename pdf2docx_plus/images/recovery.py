@@ -3,19 +3,19 @@
 Strategy:
 
 * Walk the PDF page-by-page using `fitz`.
-* For every page, compute:
-    - `raster_xrefs`: xrefs returned by `page.get_images(full=True)`.
-    - `drawing_regions`: clusters of vector drawings that look like
-      non-trivial graphics (not table border lines).
-* Compare against what upstream already emitted by reading the DOCX's
-  `word/media/` directory and the inline `<w:drawing>` elements. For
-  each missing raster image we clip-render the page region and
-  insert. For each drawing region we render at 150 DPI and insert as
-  a PNG.
+* For each page whose xobject-referenced image has no bbox returned by
+  PyMuPDF (the "repeated logo" case — upstream silently drops these),
+  clip-render the template bbox from a sibling page and inject a new
+  paragraph with the image **at the body position corresponding to
+  that page**, anchored on upstream's emitted `<w:sectPr>` elements.
+* For each page, optionally rasterize clusters of vector drawings
+  that do NOT overlap significantly with text blocks (to avoid
+  rendering text as a low-DPI raster mess).
 """
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,7 +39,8 @@ def recover_images(
     *,
     rasterize_vectors: bool = False,
     recover_missing_rasters: bool = True,
-    min_drawing_density: float = 0.0005,
+    min_drawing_density: float = 0.002,
+    max_text_overlap: float = 0.2,
     render_dpi: int = 150,
 ) -> RecoveryReport:
     """Patch `docx_path` with recovered images from `pdf_path`.
@@ -48,8 +49,11 @@ def recover_images(
         rasterize_vectors: if True, rasterize dense vector regions.
         recover_missing_rasters: if True, re-emit raster images upstream
             dropped (common for repeated logos).
-        min_drawing_density: vector drawing area / page area ratio above
-            which a cluster is rasterized.
+        min_drawing_density: (drawing_area / cluster_area) ratio below
+            which a cluster is ignored.
+        max_text_overlap: if a cluster bbox overlaps more than this
+            fraction with any text block, skip rasterizing it
+            (otherwise we'd render crisp text as a blurry PNG).
         render_dpi: target DPI for rasterization.
     """
     report = RecoveryReport()
@@ -59,16 +63,12 @@ def recover_images(
     pdf = fitz.open(pdf_path)
     doc = Document(docx_path)
     try:
+        page_anchors = _build_page_anchors(doc, len(pdf))
+
         for page_index in range(len(pdf)):
             page = pdf[page_index]
-            page_rect = page.rect
 
             if recover_missing_rasters:
-                # the logo case: same xref appears on many pages but PyMuPDF
-                # reports a bbox only on the page where it was explicitly
-                # placed. upstream `pdf2docx` then drops it on the other
-                # pages. we inject it on any page whose `get_images` lists
-                # an xref but `get_image_rects` returns empty.
                 for img_info in page.get_images(full=True):
                     xref = img_info[0]
                     try:
@@ -76,27 +76,34 @@ def recover_images(
                     except Exception:
                         rects = []
                     if rects:
-                        continue  # upstream handled this one
+                        continue
                     template_bbox = _find_template_bbox(pdf, xref)
                     if template_bbox is None:
                         continue
-                    if _inject_image(doc, pdf, page_index, template_bbox):
+                    png_bytes = _clip_page_png(page, template_bbox, scale=3.0)
+                    if png_bytes is None:
+                        continue
+                    if _insert_at_page(doc, page_anchors, page_index, png_bytes, template_bbox):
                         report.missing_raster_recovered += 1
                         report.pages_touched.append(page_index)
 
             if rasterize_vectors:
-                regions = _vector_clusters(page, page_rect, min_drawing_density)
-                for region in regions:
+                text_blocks = _text_block_rects(page)
+                for region in _vector_clusters(page, min_drawing_density):
+                    if _overlap_frac(region, text_blocks) > max_text_overlap:
+                        continue
                     try:
                         pix = page.get_pixmap(
-                            clip=region, matrix=fitz.Matrix(render_dpi / 72, render_dpi / 72)
+                            clip=region,
+                            matrix=fitz.Matrix(render_dpi / 72, render_dpi / 72),
                         )
                         png_bytes = pix.tobytes("png")
-                        _append_inline_image(doc, png_bytes, region)
-                        report.vector_regions_rasterized += 1
-                        report.pages_touched.append(page_index)
                     except Exception as e:
                         report.warnings.append(f"page {page_index + 1} vector raster failed: {e}")
+                        continue
+                    if _insert_at_page(doc, page_anchors, page_index, png_bytes, region):
+                        report.vector_regions_rasterized += 1
+                        report.pages_touched.append(page_index)
 
         if report.missing_raster_recovered or report.vector_regions_rasterized:
             doc.save(docx_path)
@@ -105,16 +112,73 @@ def recover_images(
     return report
 
 
-# -- helpers ----------------------------------------------------------------
+# -- positioning: map PDF page index -> DOCX body anchor ------------------
 
 
-def _emitted_image_count_by_page(doc: Any, pdf: fitz.Document) -> dict[int, int]:
-    """Best-effort: without page markers in the DOCX we can't know per-page
-    counts. We return a single aggregate and split by page count."""
-    total = len(doc.element.body.findall(f".//{qn('w:drawing')}"))
-    per_page = max(total // len(pdf), 1) if len(pdf) else 0
-    # the real distribution is unknown; return a uniform estimate.
-    return {i: per_page for i in range(len(pdf))}
+def _build_page_anchors(doc: Any, page_count: int) -> list[Any]:
+    """Return a list of `page_count` XML elements; the N-th is where
+    recovered content for page N should be inserted *before*.
+
+    Upstream emits `<w:sectPr>` between pages. We collect those in body
+    order; if we have fewer than `page_count`, we pad with body end.
+    """
+    body = doc.element.body
+    sect_prs: list[Any] = []
+    for p in body.iter(qn("w:p")):
+        # sectPr lives inside pPr; iter yields descendants in document order
+        sp = p.find(f"{qn('w:pPr')}/{qn('w:sectPr')}")
+        if sp is not None:
+            sect_prs.append(p)
+    # also consider top-level sectPr (the final section for the whole doc)
+    top_level = body.find(qn("w:sectPr"))
+    if top_level is not None:
+        sect_prs.append(top_level)
+
+    # anchors: use first `page_count` sectPr-bearing paragraphs.
+    # for any page beyond that, anchor at the last known sectPr so content
+    # still lands near the end rather than being lost.
+    anchors: list[Any] = []
+    for i in range(page_count):
+        if i < len(sect_prs):
+            anchors.append(sect_prs[i])
+        elif sect_prs:
+            anchors.append(sect_prs[-1])
+        else:
+            anchors.append(None)  # no anchors at all -> append at end
+    return anchors
+
+
+def _insert_at_page(
+    doc: Any,
+    anchors: list[Any],
+    page_index: int,
+    png_bytes: bytes,
+    bbox: fitz.Rect,
+) -> bool:
+    """Create a paragraph with the image and insert it before the page anchor."""
+    # build an image paragraph at the end first (python-docx API limitation),
+    # then relocate its XML to the correct position.
+    p = doc.add_paragraph()
+    run = p.add_run()
+    width_emu = Emu(int(bbox.width * 9525))
+    try:
+        run.add_picture(io.BytesIO(png_bytes), width=width_emu)
+    except Exception:
+        doc.element.body.remove(p._p)
+        return False
+
+    anchor = anchors[page_index] if page_index < len(anchors) else None
+    if anchor is None:
+        return True  # added at end by default
+    body = doc.element.body
+    # detach from end
+    body.remove(p._p)
+    # insert before anchor
+    anchor.addprevious(p._p)
+    return True
+
+
+# -- template bbox lookup --------------------------------------------------
 
 
 def _find_template_bbox(pdf: fitz.Document, xref: int) -> fitz.Rect | None:
@@ -128,65 +192,64 @@ def _find_template_bbox(pdf: fitz.Document, xref: int) -> fitz.Rect | None:
     return None
 
 
-def _inject_image(doc: Any, pdf: fitz.Document, page_index: int, template_bbox: fitz.Rect) -> bool:
-    """Clip the page at template_bbox, render, and append inline in doc."""
+def _clip_page_png(page: fitz.Page, bbox: fitz.Rect, *, scale: float = 3.0) -> bytes | None:
     try:
-        page = pdf[page_index]
-        # clip at the template bbox (which came from page 1) — in practice the
-        # logo occupies the same rectangle on every page
-        pix = page.get_pixmap(clip=template_bbox, matrix=fitz.Matrix(3, 3))
-        png_bytes = pix.tobytes("png")
+        pix = page.get_pixmap(clip=bbox, matrix=fitz.Matrix(scale, scale))
+        return pix.tobytes("png")
     except Exception:
-        return False
-    _append_inline_image(doc, png_bytes, template_bbox)
-    return True
+        return None
 
 
-def _append_inline_image(doc: Any, png_bytes: bytes, bbox: fitz.Rect) -> None:
-    """Append an inline image at the end of the body."""
-    import io
-
-    # python-docx only accepts a path or file-like
-    width_emu = Emu(int(bbox.width * 9525))  # points -> EMU (1pt=9525 EMU @ 72dpi logical)
-    # use a dedicated paragraph at end of doc so we don't collide with existing flow
-    p = doc.add_paragraph()
-    run = p.add_run()
-    run.add_picture(io.BytesIO(png_bytes), width=width_emu)
+# -- vector clustering -----------------------------------------------------
 
 
-def _vector_clusters(page: fitz.Page, page_rect: fitz.Rect, min_density: float) -> list[fitz.Rect]:
-    """Cluster vector drawings into rect regions, filtering thin table borders.
+def _text_block_rects(page: fitz.Page) -> list[fitz.Rect]:
+    out: list[fitz.Rect] = []
+    try:
+        raw = page.get_text("dict")
+    except Exception:
+        return out
+    for block in raw.get("blocks", []) or []:
+        if block.get("type") != 0:  # 0 = text block
+            continue
+        b = block.get("bbox")
+        if b is None:
+            continue
+        out.append(fitz.Rect(b))
+    return out
 
-    Returns the bounding rects of "graphic" clusters: regions whose cumulative
-    drawing area divided by the cluster bbox area exceeds `min_density`
-    *and* whose dimensions exceed both 40 x 40 pt (smaller = likely icons
-    or rule lines).
-    """
+
+def _vector_clusters(page: fitz.Page, min_density: float) -> list[fitz.Rect]:
+    """Return bbox rects of clusters of vector drawings likely to be graphics."""
     drawings = page.get_drawings()
     if not drawings:
         return []
-    rects: list[fitz.Rect] = []
+    rects: list[tuple[fitz.Rect, float]] = []  # (rect, area)
     for d in drawings:
         r = d.get("rect")
         if r is None:
             continue
-        # skip single-line strokes (table borders)
-        if r.width < 3 or r.height < 3:
+        rr = fitz.Rect(r)
+        # skip thin rule lines (table borders, underlines)
+        if rr.width < 3 or rr.height < 3:
             continue
-        rects.append(fitz.Rect(r))
+        rects.append((rr, rr.width * rr.height))
+    if not rects:
+        return []
 
-    # merge overlapping rects
-    merged = _merge_overlapping(rects, pad=15.0)
+    merged = _merge_overlapping([r for r, _ in rects], pad=10.0)
 
-    page_area = page_rect.width * page_rect.height
     clusters: list[fitz.Rect] = []
-    for r in merged:
-        if r.width < 40 or r.height < 40:
+    for m in merged:
+        # drawing area inside this merged bbox
+        total_draw_area = sum(a for r, a in rects if m.contains(r) or m.intersects(r))
+        m_area = max(m.width * m.height, 1.0)
+        density = total_draw_area / m_area
+        if m.width < 60 or m.height < 60:
             continue
-        cluster_area = r.width * r.height
-        if cluster_area / max(page_area, 1) < min_density:
+        if density < min_density:
             continue
-        clusters.append(r)
+        clusters.append(m)
     return clusters
 
 
@@ -206,3 +269,17 @@ def _merge_overlapping(rects: list[fitz.Rect], *, pad: float = 0.0) -> list[fitz
                 out.append(fitz.Rect(r))
         current = out
     return current
+
+
+def _overlap_frac(region: fitz.Rect, blocks: list[fitz.Rect]) -> float:
+    """Max fraction of `region` area covered by any single text block."""
+    region_area = max(region.width * region.height, 1.0)
+    best = 0.0
+    for b in blocks:
+        inter = region & b
+        if inter.is_empty:
+            continue
+        frac = (inter.width * inter.height) / region_area
+        if frac > best:
+            best = frac
+    return best

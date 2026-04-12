@@ -173,7 +173,7 @@ class Converter:
         extract_headers_footers_to_section: bool = False,
         consolidate_adjacent_runs: bool = True,
         collapse_empty_paras: bool = True,
-        recover_missing_images: bool = True,
+        recover_missing_images: bool = False,
         rasterize_vector_graphics: bool = False,
     ) -> ConversionResult:
         """Convert PDF to DOCX.
@@ -200,6 +200,20 @@ class Converter:
             consolidate_adjacent_runs: merge adjacent `<w:r>` elements
                 with identical run-properties. Default True — safe,
                 improves editability.
+            collapse_empty_paras: remove runs of empty `<w:p>` elements
+                left behind by upstream's emitter when it drops image
+                blocks. Default True — safe cleanup.
+            recover_missing_images: **opt-in.** Re-emit xref-referenced
+                raster images that upstream dropped because
+                PyMuPDF's `get_image_rects()` returned empty (common
+                for repeat-per-page logos). Inserts the image at the
+                body position of the source page. Default False
+                because an imperfect page-anchor detection can put
+                images in the wrong spot on unusual layouts.
+            rasterize_vector_graphics: **opt-in.** Detect clusters of
+                vector strokes that don't overlap text, rasterize at
+                `render_dpi`, embed inline. Default False — can
+                produce blurry output on text-dense pages.
 
         Returns:
             ConversionResult describing the outcome.
