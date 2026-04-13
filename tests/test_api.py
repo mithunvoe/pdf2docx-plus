@@ -74,3 +74,15 @@ def test_profile_fast_vs_fidelity(tmp_path: Path, kfs_pdf: Path) -> None:
     with Converter(kfs_pdf) as cv:
         r2 = cv.convert(out_fid, profile="fidelity", timeout_s=60)
     assert r1.success and r2.success
+
+
+@pytest.mark.unit
+def test_profile_disables_stream_table_detection_by_default() -> None:
+    """Stream-table detection fabricates tables on borderless layouts; it
+    must be opt-in. Regression guard for 'tables created out of nowhere'.
+    """
+    from pdf2docx_plus.api import _profile_settings
+
+    assert _profile_settings("fast")["parse_stream_table"] is False
+    assert _profile_settings("fidelity")["parse_stream_table"] is False
+    assert _profile_settings("semantic")["parse_stream_table"] is True

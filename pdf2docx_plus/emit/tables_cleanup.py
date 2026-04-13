@@ -154,7 +154,82 @@ def unwrap_tiny_tables(
     return unwrapped
 
 
+def drop_empty_tables(document: Any) -> int:
+    """Remove tables where every cell has no text, image, or drawing.
+
+    Upstream's lattice detector faithfully finds bordered rectangles in the
+    source PDF. When those rectangles are empty checkbox grids, underline
+    strokes, or presentation artifacts rather than data tables, content
+    extraction yields every-cell-empty tables. These surface in the DOCX
+    as mysterious empty bordered grids and are the dominant cause of
+    "tables out of nowhere" reports.
+
+    A table is dropped only when EVERY cell is empty across text, images,
+    and drawings — genuine data tables with sparse content (e.g. a single
+    populated row) are preserved.
+
+    Returns the number of tables removed.
+    """
+    body = document.element.body
+    removed = 0
+    for tbl in list(body.findall(qn("w:tbl"))):
+        if _table_is_fully_empty(tbl):
+            parent = tbl.getparent()
+            if parent is not None:
+                parent.remove(tbl)
+                removed += 1
+    return removed
+
+
+def trim_empty_table_rows(document: Any) -> int:
+    """Strip leading and trailing all-empty rows from each table.
+
+    Leaves interior empty rows alone (they may be intentional spacers).
+    Skips tables with a single row. Returns the number of rows removed.
+    """
+    removed = 0
+    for tbl in document.element.body.findall(qn("w:tbl")):
+        rows = tbl.findall(qn("w:tr"))
+        if len(rows) <= 1:
+            continue
+        # trailing
+        while len(rows) > 1 and _row_is_empty(rows[-1]):
+            tbl.remove(rows[-1])
+            rows = tbl.findall(qn("w:tr"))
+            removed += 1
+        # leading
+        while len(rows) > 1 and _row_is_empty(rows[0]):
+            tbl.remove(rows[0])
+            rows = tbl.findall(qn("w:tr"))
+            removed += 1
+    return removed
+
+
 # -- helpers --------------------------------------------------------------
+
+
+def _table_is_fully_empty(tbl: Any) -> bool:
+    for tc in tbl.iter(qn("w:tc")):
+        if _cell_has_content(tc):
+            return False
+    return True
+
+
+def _row_is_empty(tr: Any) -> bool:
+    for tc in tr.findall(qn("w:tc")):
+        if _cell_has_content(tc):
+            return False
+    return True
+
+
+def _cell_has_content(tc: Any) -> bool:
+    if _cell_plain_text(tc):
+        return True
+    # images / shapes / embedded objects count as content
+    for tag in ("w:drawing", "w:pict", "w:object"):
+        if tc.find(f".//{qn(tag)}") is not None:
+            return True
+    return False
 
 
 def _col_widths(tbl: Any) -> list[int]:

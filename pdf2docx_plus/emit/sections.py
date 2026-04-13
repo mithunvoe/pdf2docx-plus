@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 
@@ -102,14 +103,77 @@ def _int(s: str | None, default: int) -> int:
         return default
 
 
-def clamp_paragraph_spacing(document: Any, *, max_twips: int = 2400) -> int:
+def flatten_per_page_sections(document: Any) -> int:
+    """Convert per-page `nextPage` section breaks to `continuous`.
+
+    Upstream emits one `<w:sectPr>` per source PDF page, each with its
+    own page margins and a default (`nextPage`) break type — i.e. a
+    forced page break at every section boundary. When Word renders the
+    text with a substituted font, content can overflow its section's
+    tight margin by a few millimetres; the overflow lands on a new
+    page, but the next section's `nextPage` break still fires, costing
+    a full page per overflow. A 67-page PDF can balloon to 73 DOCX
+    pages from this alone.
+
+    Converting mid-document break types to `continuous` lets Word
+    repaginate naturally — content flows section-to-section without
+    forced breaks, and the rendered page count tracks actual content
+    length.
+
+    Skipped (returns 0) when:
+      * any sectPr declares a per-section `headerReference` or
+        `footerReference` — collapsing breaks would cause those parts
+        to be applied to the wrong content;
+      * page sizes (`pgSz`) vary across sections — different page
+        sizes legitimately need page breaks (landscape/portrait mix).
+
+    Returns the number of section breaks converted.
+    """
+    body = document.element.body
+    sect_prs = list(body.iter(qn("w:sectPr")))
+    if len(sect_prs) <= 1:
+        return 0
+    for sp in sect_prs:
+        if sp.find(qn("w:headerReference")) is not None:
+            return 0
+        if sp.find(qn("w:footerReference")) is not None:
+            return 0
+    pg_sizes = set()
+    for sp in sect_prs:
+        sz = sp.find(qn("w:pgSz"))
+        if sz is not None:
+            pg_sizes.add(
+                (sz.get(qn("w:w")), sz.get(qn("w:h")), sz.get(qn("w:orient")))
+            )
+    if len(pg_sizes) > 1:
+        return 0
+    converted = 0
+    for sp in sect_prs:
+        # final sectPr is body's direct child; mid-doc are inside w:pPr
+        parent = sp.getparent()
+        if parent is None or parent.tag != qn("w:pPr"):
+            continue
+        type_el = sp.find(qn("w:type"))
+        if type_el is None:
+            type_el = OxmlElement("w:type")
+            sp.insert(0, type_el)
+        if type_el.get(qn("w:val")) != "continuous":
+            type_el.set(qn("w:val"), "continuous")
+            converted += 1
+    return converted
+
+
+def clamp_paragraph_spacing(document: Any, *, max_twips: int = 480) -> int:
     """Cap `w:spacing w:before` / `w:after` at `max_twips`.
 
-    Upstream occasionally emits paragraph spacing values > 10 000 twips
-    (> 7 inches) when it misreads vertical position markers — a single
-    such paragraph alone pushes subsequent content across a page
-    boundary. Clamping at 2400 twips (~1.67 in) preserves intentional
-    section spacing while cutting the pathological outliers.
+    Upstream emits paragraph spacing values that encode the inter-block
+    vertical gap measured in the source PDF. With the default font
+    substitution (Liberation Sans) text takes more vertical space than
+    the original, and an inflated `w:before` / `w:after` then pushes
+    content past the per-page section boundary, costing a full page
+    each time. Clamping at 480 twips (~24pt = 2 lines) preserves
+    typical paragraph break spacing while cutting the inflated values
+    that drive page-count overflow.
 
     Returns the number of attributes clamped.
     """

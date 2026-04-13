@@ -1,5 +1,63 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- New post-emit pass `flatten_per_page_sections()` in
+  `pdf2docx_plus.emit.sections`. Converts upstream's per-source-page
+  `nextPage` section breaks to `continuous` so Word repaginates
+  naturally. Wired into the pipeline behind the new `flatten_sections`
+  flag on `convert()` (**default `False`** — preserves source page
+  boundaries; opt in for content packing). Skipped automatically when
+  any section carries a `headerReference`/`footerReference` or when
+  page sizes vary across sections (landscape/portrait mix).
+  `ConversionResult` now reports `sections_flattened`.
+- Post-emit passes `drop_empty_tables()` and `trim_empty_table_rows()`
+  in `pdf2docx_plus.emit.tables_cleanup`. Run before
+  `merge_consecutive_single_row_tables` / `unwrap_tiny_tables` when
+  `cleanup_tiny_tables=True`. `ConversionResult` now reports
+  `empty_tables_dropped` and `empty_table_rows_trimmed`.
+
+### Changed
+
+- `clamp_paragraph_spacing()` default `max_twips` lowered from 2400
+  (~120pt) to 480 (~24pt = 2 lines). Upstream encodes inter-block
+  vertical gaps measured in the source PDF as `w:before` / `w:after`;
+  with font substitution these inflated values push content past
+  per-page section boundaries, costing a full page each. The new cap
+  preserves typical paragraph break spacing while cutting the
+  pathological values that drive page-count overflow.
+
+### Fixed
+
+- **Page-count inflation from per-page section breaks.** Upstream
+  emits one `<w:sectPr>` per source PDF page with default `nextPage`
+  break type. When font substitution shifts text by a few millimetres,
+  content overflows its tight per-page section and the next section's
+  hard page break still fires — costing a full page per overflow. The
+  new `flatten_per_page_sections` pass downgrades these mid-document
+  breaks to `continuous`, letting Word repaginate naturally so the
+  rendered page count tracks actual content length.
+- **Empty tables from detected checkbox grids and stroke artifacts.**
+  pdf2docx's lattice detector correctly identifies drawn rectangles
+  (empty checkbox columns, underline strokes, marginalia boxes) as
+  bordered tables, but content extraction leaves every cell blank —
+  producing mysterious empty bordered grids in the DOCX. The new
+  `drop_empty_tables` pass removes tables where every cell has no
+  text, image, or drawing; `trim_empty_table_rows` strips leading and
+  trailing all-blank rows from sparse tables while preserving interior
+  blank rows. Genuine data tables with sparse content are untouched.
+- **Spurious tables on borderless pages.** The `fidelity` (default) and
+  `fast` profiles no longer enable upstream's `parse_stream_table`
+  detector, which inferred tables from text alignment alone and
+  fabricated tables around multi-column layouts, aligned label/value
+  blocks, and spec lists even when the source PDF had no visible
+  borders or shading. Stream-table detection is now opt-in via the
+  `semantic` profile or `extra_settings={"parse_stream_table": True}`.
+  Lattice (bordered) table detection is unchanged. `extract_tables()`
+  continues to run stream detection since that is its purpose.
+
 ## 0.6.0a3 (unreleased)
 
 Roadmap milestones M1, M2 (partial), M3 (partial), M4 (detection), M5

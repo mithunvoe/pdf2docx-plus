@@ -21,18 +21,31 @@ from __future__ import annotations
 from .headers_footers import extract_headers_footers
 from .lists import apply_lists
 from .page_breaks import insert_page_breaks
-from .sections import clamp_paragraph_spacing, fix_page_margins, normalize_multi_column_sections
-from .tables_cleanup import merge_consecutive_single_row_tables, unwrap_tiny_tables
+from .sections import (
+    clamp_paragraph_spacing,
+    fix_page_margins,
+    flatten_per_page_sections,
+    normalize_multi_column_sections,
+)
+from .tables_cleanup import (
+    drop_empty_tables,
+    merge_consecutive_single_row_tables,
+    trim_empty_table_rows,
+    unwrap_tiny_tables,
+)
 from .whitespace import collapse_empty_paragraphs
 
 __all__ = [
     "apply_lists",
     "clamp_paragraph_spacing",
     "collapse_empty_paragraphs",
+    "drop_empty_tables",
     "extract_headers_footers",
     "fix_page_margins",
+    "flatten_per_page_sections",
     "insert_page_breaks",
     "merge_consecutive_single_row_tables",
     "normalize_multi_column_sections",
+    "trim_empty_table_rows",
     "unwrap_tiny_tables",
 ]

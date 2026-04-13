@@ -36,11 +36,14 @@ from .emit import (
     apply_lists,
     clamp_paragraph_spacing,
     collapse_empty_paragraphs,
+    drop_empty_tables,
     extract_headers_footers,
     fix_page_margins,
+    flatten_per_page_sections,
     insert_page_breaks,
     merge_consecutive_single_row_tables,
     normalize_multi_column_sections,
+    trim_empty_table_rows,
     unwrap_tiny_tables,
 )
 from .errors import (
@@ -92,6 +95,9 @@ class ConversionResult:
     page_breaks_inserted: int = 0
     tiny_tables_unwrapped: int = 0
     tables_merged: int = 0
+    empty_tables_dropped: int = 0
+    empty_table_rows_trimmed: int = 0
+    sections_flattened: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
     peak_rss_mb: float | None = None
@@ -189,6 +195,7 @@ class Converter:
         consolidate_adjacent_runs: bool = True,
         collapse_empty_paras: bool = True,
         normalize_multi_col_sections: bool = True,
+        flatten_sections: bool = False,
         cleanup_tiny_tables: bool = True,
         explicit_page_breaks: bool = False,
         recover_missing_images: bool = False,
@@ -208,6 +215,13 @@ class Converter:
                 not abort the whole job; if False, the first error raises.
             multi_processing: parallel page parse via upstream worker pool.
             profile: "fast" | "fidelity" | "semantic" -> tuned setting preset.
+                "fast" and "fidelity" only detect bordered (lattice) tables.
+                "semantic" additionally enables the upstream stream-table
+                detector (borderless tables inferred from text alignment) —
+                this can fabricate tables in multi-column layouts and
+                aligned label/value lists, so it is opt-in. To force stream
+                detection on any profile, pass
+                `extra_settings={"parse_stream_table": True}`.
             apply_list_formatting: detect bullet / numbered lists and emit
                 real OOXML `w:numPr` lists. Default True.
             extract_headers_footers_to_section: move detected repeating
@@ -220,6 +234,24 @@ class Converter:
             consolidate_adjacent_runs: merge adjacent `<w:r>` elements
                 with identical run-properties. Default True — safe,
                 improves editability.
+            flatten_sections: convert per-page `nextPage` section
+                breaks to `continuous` so Word repaginates naturally.
+                **Default False** — preserves the source PDF's
+                per-page layout (each PDF page → one DOCX section
+                with its own margins). Set to True to let content
+                pack across page boundaries; this typically yields
+                fewer pages but loses the 1:1 page mapping when the
+                source has short pages. Skipped automatically when
+                sections carry per-section headers/footers or use
+                mixed page sizes (landscape/portrait).
+
+                Trade-off note: with the default font substitution
+                (Liberation Sans), per-page sections can overflow by
+                a few millimetres on dense pages, adding pages.
+                `flatten_sections=True` removes those extras at the
+                cost of source-page identity. Neither produces an
+                exact source-page-count match without bundling the
+                original PDF fonts.
             collapse_empty_paras: remove runs of empty `<w:p>` elements
                 left behind by upstream's emitter when it drops image
                 blocks. Default True — safe cleanup.
@@ -274,6 +306,7 @@ class Converter:
             "consolidate": consolidate_adjacent_runs,
             "collapse_empty": collapse_empty_paras,
             "normalize_sections": normalize_multi_col_sections,
+            "flatten_sections": flatten_sections,
             "cleanup_tiny_tables": cleanup_tiny_tables,
             "explicit_page_breaks": explicit_page_breaks,
             "skip_images": skip_images,
@@ -336,6 +369,9 @@ class Converter:
         """
         settings = dict(self._inner.default_settings)
         settings.update(_profile_settings("fidelity"))
+        # extract_tables() callers explicitly want tables, so re-enable the
+        # stream detector that the fidelity profile disables by default.
+        settings["parse_stream_table"] = True
         page_list = list(pages) if pages is not None else None
         try:
             tables = self._inner.extract_tables(start=start, end=end, pages=page_list, **settings)
@@ -518,8 +554,27 @@ class Converter:
                             dirty = True
                     except Exception as e:
                         _log.debug("section normalization skipped: %s", e)
+                if pp.get("flatten_sections"):
+                    try:
+                        flattened = flatten_per_page_sections(doc)
+                        if flattened:
+                            dirty = True
+                            result.sections_flattened = flattened
+                    except Exception as e:
+                        _log.debug("section flattening skipped: %s", e)
                 if pp.get("cleanup_tiny_tables"):
                     try:
+                        # run before merge/unwrap so empty grids don't get
+                        # absorbed into sibling tables or exploded into
+                        # tab-stop paragraphs.
+                        trimmed = trim_empty_table_rows(doc)
+                        if trimmed:
+                            dirty = True
+                            result.empty_table_rows_trimmed = trimmed
+                        dropped = drop_empty_tables(doc)
+                        if dropped:
+                            dirty = True
+                            result.empty_tables_dropped = dropped
                         merged = merge_consecutive_single_row_tables(doc)
                         if merged:
                             dirty = True
@@ -694,10 +749,16 @@ def _profile_settings(profile: str) -> dict[str, Any]:
             "clip_image_res_ratio": 4.0,
         }
     # default: fidelity
+    # NOTE: stream-table detection is OFF by default. The upstream detector
+    # infers tables from text alignment alone and fabricates tables on
+    # multi-column layouts, aligned label/value lists, and spec sheets even
+    # when the source PDF has no borders or shading. Users who want
+    # borderless-table detection should select the "semantic" profile or
+    # pass extra_settings={"parse_stream_table": True}.
     return {
         "debug": False,
         "parse_lattice_table": True,
-        "parse_stream_table": True,
+        "parse_stream_table": False,
         "extract_stream_table": False,
         "clip_image_res_ratio": 4.0,
     }
