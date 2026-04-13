@@ -4,6 +4,13 @@
 
 ### Added
 
+- New post-emit pass `promote_page_numbers_to_footer()` in
+  `pdf2docx_plus.emit.page_footer`. Detects per-page footer body text
+  (``"N Last update: ..."``, bare page-number paragraphs, and
+  repeated footer lines) and rewrites them into a real ``w:footer``
+  with a right-aligned auto-updating ``PAGE`` field. Gated by the new
+  `promote_page_footer` flag on `convert()` (default True).
+  `ConversionResult` now reports `page_footer_lines_promoted`.
 - New post-emit pass `flatten_per_page_sections()` in
   `pdf2docx_plus.emit.sections`. Converts upstream's per-source-page
   `nextPage` section breaks to `continuous` so Word repaginates
@@ -31,6 +38,13 @@
 
 ### Fixed
 
+- **Page numbers appeared as static inline body text instead of in
+  the footer.** Upstream emits the per-page footer line as a plain
+  body paragraph on every source page, so ``"1"``, ``"2"``, ... never
+  update when the DOCX repaginates, and ``"Last update: 2 October
+  2024"`` is duplicated 67× in the body. The new
+  `promote_page_numbers_to_footer` pass strips those body paragraphs
+  and injects a proper footer with a right-aligned ``PAGE`` field.
 - **Page-count inflation from per-page section breaks.** Upstream
   emits one `<w:sectPr>` per source PDF page with default `nextPage`
   break type. When font substitution shifts text by a few millimetres,

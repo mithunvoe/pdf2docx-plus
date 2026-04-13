@@ -21,6 +21,7 @@ from __future__ import annotations
 from .headers_footers import extract_headers_footers
 from .lists import apply_lists
 from .page_breaks import insert_page_breaks
+from .page_footer import promote_page_numbers_to_footer
 from .sections import (
     clamp_paragraph_spacing,
     fix_page_margins,
@@ -46,6 +47,7 @@ __all__ = [
     "insert_page_breaks",
     "merge_consecutive_single_row_tables",
     "normalize_multi_column_sections",
+    "promote_page_numbers_to_footer",
     "trim_empty_table_rows",
     "unwrap_tiny_tables",
 ]

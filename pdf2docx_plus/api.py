@@ -41,6 +41,7 @@ from .emit import (
     fix_page_margins,
     flatten_per_page_sections,
     insert_page_breaks,
+    promote_page_numbers_to_footer,
     merge_consecutive_single_row_tables,
     normalize_multi_column_sections,
     trim_empty_table_rows,
@@ -98,6 +99,7 @@ class ConversionResult:
     empty_tables_dropped: int = 0
     empty_table_rows_trimmed: int = 0
     sections_flattened: int = 0
+    page_footer_lines_promoted: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
     peak_rss_mb: float | None = None
@@ -197,6 +199,7 @@ class Converter:
         normalize_multi_col_sections: bool = True,
         flatten_sections: bool = False,
         cleanup_tiny_tables: bool = True,
+        promote_page_footer: bool = True,
         explicit_page_breaks: bool = False,
         recover_missing_images: bool = False,
         rasterize_vector_graphics: bool = False,
@@ -234,6 +237,13 @@ class Converter:
             consolidate_adjacent_runs: merge adjacent `<w:r>` elements
                 with identical run-properties. Default True — safe,
                 improves editability.
+            promote_page_footer: detect per-page footer body text
+                (``"N Last update: 2 October 2024"`` etc.) and replace
+                with a real ``w:footer`` containing a right-aligned
+                auto-updating ``PAGE`` field. Default True — upstream
+                emits these footer lines as plain body paragraphs so
+                the page number is static and the footer text is
+                duplicated on every page.
             flatten_sections: convert per-page `nextPage` section
                 breaks to `continuous` so Word repaginates naturally.
                 **Default False** — preserves the source PDF's
@@ -308,6 +318,7 @@ class Converter:
             "normalize_sections": normalize_multi_col_sections,
             "flatten_sections": flatten_sections,
             "cleanup_tiny_tables": cleanup_tiny_tables,
+            "promote_page_footer": promote_page_footer,
             "explicit_page_breaks": explicit_page_breaks,
             "skip_images": skip_images,
             "recover_missing": recover_missing_images,
@@ -585,6 +596,14 @@ class Converter:
                             result.tiny_tables_unwrapped = unwrapped
                     except Exception as e:
                         _log.debug("tiny table cleanup skipped: %s", e)
+                if pp.get("promote_page_footer"):
+                    try:
+                        promoted = promote_page_numbers_to_footer(doc)
+                        if promoted:
+                            dirty = True
+                            result.page_footer_lines_promoted = promoted
+                    except Exception as e:
+                        _log.debug("page-footer promotion skipped: %s", e)
                 if pp.get("explicit_page_breaks"):
                     try:
                         inserted = insert_page_breaks(doc)
