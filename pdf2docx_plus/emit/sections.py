@@ -163,6 +163,68 @@ def flatten_per_page_sections(document: Any) -> int:
     return converted
 
 
+def collapse_empty_sections(document: Any) -> int:
+    """Remove sections whose body contains no visible content.
+
+    Upstream occasionally emits `<w:sectPr>` boundaries between empty
+    placeholder paragraphs — e.g. a header-detection stub or a spurious
+    page-break sentinel that holds no text, image, or drawing. Each
+    empty section with a default (``nextPage``) break type still forces
+    a page break, so the reader sees a blank page for every orphan
+    section.
+
+    This pass walks the body paragraphs in order, groups them into
+    per-section buckets (each bucket ending at a paragraph whose
+    ``<w:pPr>`` carries a ``<w:sectPr>``), and removes every bucket
+    that has no visible content. The final section - which uses the
+    body-level ``<w:sectPr>`` rather than a paragraph-level one - is
+    never removed; stripping it would orphan the whole document.
+
+    "Visible content" means any ``<w:t>`` with non-whitespace text,
+    any ``<w:drawing>``, ``<w:pict>``, ``<w:object>``, or ``<w:tbl>``
+    between the previous section boundary and this one.
+
+    Returns the number of empty sections collapsed.
+    """
+    body = document.element.body
+    collapsed = 0
+    # scan the body's direct children; tables and paragraphs are siblings
+    children = list(body)
+    buckets: list[list[Any]] = [[]]
+    for child in children:
+        buckets[-1].append(child)
+        if child.tag == qn("w:p"):
+            if child.find(qn("w:pPr") + "/" + qn("w:sectPr")) is not None:
+                buckets.append([])
+    # final bucket uses body-level sectPr - leave it alone
+    if buckets and not buckets[-1]:
+        buckets.pop()
+    if len(buckets) <= 1:
+        return 0
+    for bucket in buckets[:-1]:
+        if _bucket_has_content(bucket):
+            continue
+        for el in bucket:
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+        collapsed += 1
+    return collapsed
+
+
+def _bucket_has_content(bucket: list[Any]) -> bool:
+    for el in bucket:
+        if el.tag == qn("w:tbl"):
+            return True
+        for t in el.iter(qn("w:t")):
+            if (t.text or "").strip():
+                return True
+        for tag in ("w:drawing", "w:pict", "w:object"):
+            if el.find(".//" + qn(tag)) is not None:
+                return True
+    return False
+
+
 def clamp_paragraph_spacing(document: Any, *, max_twips: int = 480) -> int:
     """Cap `w:spacing w:before` / `w:after` at `max_twips`.
 

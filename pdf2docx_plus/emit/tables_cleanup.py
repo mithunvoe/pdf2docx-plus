@@ -154,54 +154,71 @@ def unwrap_tiny_tables(
     return unwrapped
 
 
-def drop_empty_tables(document: Any) -> int:
-    """Remove tables where every cell has no text, image, or drawing.
+def drop_empty_tables(document: Any, *, max_cells: int = 9) -> int:
+    """Remove small tables whose every cell is empty.
 
-    Upstream's lattice detector faithfully finds bordered rectangles in the
-    source PDF. When those rectangles are empty checkbox grids, underline
-    strokes, or presentation artifacts rather than data tables, content
-    extraction yields every-cell-empty tables. These surface in the DOCX
-    as mysterious empty bordered grids and are the dominant cause of
-    "tables out of nowhere" reports.
+    Upstream's lattice detector faithfully finds bordered rectangles in
+    the source PDF. When a small rectangle encloses nothing - an
+    underline stroke, a decorative margin box, a single detection
+    artifact - the resulting table is pure noise and should be dropped.
 
-    A table is dropped only when EVERY cell is empty across text, images,
-    and drawings — genuine data tables with sparse content (e.g. a single
-    populated row) are preserved.
+    Larger empty tables, however, are usually **legitimate form
+    grids** (e.g. the checkbox continuation rows on a multi-page
+    application form). Dropping those destroys the form: the user
+    loses the place where their ticks are supposed to go.
+
+    Heuristic: only drop fully-empty tables with at most ``max_cells``
+    total cells (default 9 - a 3x3 grid). Anything larger is kept
+    even when empty.
 
     Returns the number of tables removed.
     """
     body = document.element.body
     removed = 0
     for tbl in list(body.findall(qn("w:tbl"))):
-        if _table_is_fully_empty(tbl):
-            parent = tbl.getparent()
-            if parent is not None:
-                parent.remove(tbl)
-                removed += 1
+        if not _table_is_fully_empty(tbl):
+            continue
+        rows = tbl.findall(qn("w:tr"))
+        n_cells = sum(len(r.findall(qn("w:tc"))) for r in rows)
+        if n_cells > max_cells:
+            continue
+        parent = tbl.getparent()
+        if parent is not None:
+            parent.remove(tbl)
+            removed += 1
     return removed
 
 
 def trim_empty_table_rows(document: Any) -> int:
-    """Strip leading and trailing all-empty rows from each table.
+    """Strip empty rows from tables that look like lattice detection
+    artifacts.
 
-    Leaves interior empty rows alone (they may be intentional spacers).
-    Skips tables with a single row. Returns the number of rows removed.
+    Previous behaviour was to strip every leading and trailing empty
+    row, which destroyed legitimate form/checkbox tables (e.g. the
+    SFC Information Checklist's ``Applicable? (please tick)`` grids)
+    where rows 2..N are empty by design.
+
+    This version only trims when the table is **small and sparse** -
+    at most four rows with exactly one non-empty row - which is the
+    lattice-artifact signature (a single piece of text surrounded by
+    detected-but-empty border rectangles). Multi-row forms whose data
+    rows are intentionally blank are now preserved verbatim.
+
+    Returns the number of rows removed.
     """
     removed = 0
     for tbl in document.element.body.findall(qn("w:tbl")):
         rows = tbl.findall(qn("w:tr"))
-        if len(rows) <= 1:
+        # Need at least one empty row to trim and at least one content row to keep.
+        if len(rows) < 2 or len(rows) > 4:
             continue
-        # trailing
-        while len(rows) > 1 and _row_is_empty(rows[-1]):
-            tbl.remove(rows[-1])
-            rows = tbl.findall(qn("w:tr"))
-            removed += 1
-        # leading
-        while len(rows) > 1 and _row_is_empty(rows[0]):
-            tbl.remove(rows[0])
-            rows = tbl.findall(qn("w:tr"))
-            removed += 1
+        non_empty = [r for r in rows if not _row_is_empty(r)]
+        if len(non_empty) != 1:
+            continue
+        for r in rows:
+            if _row_is_empty(r):
+                tbl.remove(r)
+                removed += 1
     return removed
 
 

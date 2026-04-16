@@ -89,3 +89,80 @@ def test_idempotent() -> None:
     promote_page_numbers_to_footer(doc)
     second = promote_page_numbers_to_footer(doc)
     assert second == 0
+
+
+@pytest.mark.unit
+def test_promotes_bare_monotonic_page_number_sequence() -> None:
+    """First Sentier-style: bare ``"1", "2", ..., "N"`` sprinkled
+    one per source page, with no ``Last update:`` line."""
+    doc = Document()
+    for i in range(1, 7):
+        _add_body_paragraph(doc, f"body content of page {i}")
+        _add_body_paragraph(doc, str(i))
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 6
+    body_text = [p.text for p in doc.paragraphs]
+    for i in range(1, 7):
+        assert str(i) not in body_text
+    assert all(f"body content of page {i}" in body_text for i in range(1, 7))
+    # Bare-digit path leaves upstream's footer alone — installing a new
+    # footer in the tight per-page sections re-inflates the page count.
+
+
+@pytest.mark.unit
+def test_promotes_sequence_with_small_gaps() -> None:
+    """Upstream sometimes drops a page number on a full-bleed image
+    page; a gap of 2 should still be tolerated."""
+    doc = Document()
+    for v in (1, 2, 3, 4, 5, 7, 8, 10, 11):
+        _add_body_paragraph(doc, f"content_{v}")
+        _add_body_paragraph(doc, str(v))
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 9
+    body_text = [p.text for p in doc.paragraphs]
+    for v in (1, 2, 3, 4, 5, 7, 8, 10, 11):
+        assert str(v) not in body_text
+
+
+@pytest.mark.unit
+def test_skips_short_monotonic_run() -> None:
+    """Fewer than five digits is not enough evidence."""
+    doc = Document()
+    _add_body_paragraph(doc, "body")
+    _add_body_paragraph(doc, "1")
+    _add_body_paragraph(doc, "2")
+    _add_body_paragraph(doc, "3")
+    _add_body_paragraph(doc, "body")
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 0
+
+
+@pytest.mark.unit
+def test_skips_when_digits_look_like_data_values() -> None:
+    """Scattered digit values (75, 100, 42) are not a page-number run.
+
+    The heuristic requires a monotonic step-1 sequence that starts
+    at 1-3 and covers the majority of bare-digit paragraphs.
+    """
+    doc = Document()
+    _add_body_paragraph(doc, "Table values:")
+    for val in ("75", "100", "42", "17", "5"):
+        _add_body_paragraph(doc, val)
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 0
+    assert all(p.text in {"75", "100", "42", "17", "5", "Table values:"} for p in doc.paragraphs)
+
+
+@pytest.mark.unit
+def test_sparse_page_run_ignored_when_mixed_with_data() -> None:
+    """A short page-run (1,2,3) interleaved with many non-monotonic digits
+    should not trigger promotion — the digits are probably data."""
+    doc = Document()
+    _add_body_paragraph(doc, "1")
+    _add_body_paragraph(doc, "2")
+    _add_body_paragraph(doc, "3")
+    # 7 unrelated digit paragraphs - run is now <50% of bare digits
+    for v in ("75", "100", "42", "17", "9", "88", "6"):
+        _add_body_paragraph(doc, v)
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 0

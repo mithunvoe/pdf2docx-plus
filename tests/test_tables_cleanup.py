@@ -75,16 +75,28 @@ def test_drop_empty_tables_leaves_populated_sparse_tables() -> None:
 
 
 @pytest.mark.unit
-def test_trim_empty_table_rows_strips_leading_and_trailing() -> None:
-    doc = _make_doc_with_tables(
-        [[["", ""], ["x", "y"], ["", ""], ["z", "w"], ["", ""], ["", ""]]]
-    )
+def test_drop_empty_tables_preserves_large_empty_form_grids() -> None:
+    """A 14x2 all-empty table is almost certainly a form's checkbox
+    continuation grid, not a decoration. Do not drop it."""
+    big_empty = [["", ""] for _ in range(14)]
+    doc = _make_doc_with_tables([big_empty])
+    removed = drop_empty_tables(doc)
+    assert removed == 0
+    assert len(doc.tables) == 1
+
+
+@pytest.mark.unit
+def test_trim_empty_table_rows_trims_sparse_lattice_artifact() -> None:
+    """Lattice detector often finds a rectangle around a single piece
+    of text plus a few spurious empty cells. The 4-row case with one
+    content row is the signature we want to collapse to 1 row."""
+    doc = _make_doc_with_tables([[["", ""], ["only", "data"], ["", ""], ["", ""]]])
     tbl = doc.tables[0]
-    assert len(tbl.rows) == 6
+    assert len(tbl.rows) == 4
     trimmed = trim_empty_table_rows(doc)
-    assert trimmed == 3  # one leading + two trailing
+    assert trimmed == 3
     rows_after = [[c.text for c in r.cells] for r in doc.tables[0].rows]
-    assert rows_after == [["x", "y"], ["", ""], ["z", "w"]]
+    assert rows_after == [["only", "data"]]
 
 
 @pytest.mark.unit
@@ -93,3 +105,27 @@ def test_trim_empty_table_rows_preserves_single_row() -> None:
     trimmed = trim_empty_table_rows(doc)
     assert trimmed == 0
     assert len(doc.tables[0].rows) == 1
+
+
+@pytest.mark.unit
+def test_trim_empty_table_rows_preserves_form_checkbox_tables() -> None:
+    """Multi-row forms (``Applicable? | Yes | No`` + empty checkbox
+    rows) must survive untouched: the empty rows are the form."""
+    doc = _make_doc_with_tables(
+        [[["Applicable?", "Applicable?"], ["Yes", "No"], ["", ""], ["", ""], ["", ""], ["", ""]]]
+    )
+    tbl = doc.tables[0]
+    assert len(tbl.rows) == 6
+    trimmed = trim_empty_table_rows(doc)
+    assert trimmed == 0
+    assert len(doc.tables[0].rows) == 6
+
+
+@pytest.mark.unit
+def test_trim_empty_table_rows_preserves_multi_content_tables() -> None:
+    """A 5-row table with two content rows is a real table; no trimming."""
+    doc = _make_doc_with_tables(
+        [[["", ""], ["row1", "a"], ["", ""], ["row2", "b"], ["", ""]]]
+    )
+    trimmed = trim_empty_table_rows(doc)
+    assert trimmed == 0

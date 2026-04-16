@@ -2,8 +2,82 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Tables clipped off the right edge of the page.** Upstream carries
+  ``<w:tblInd>`` and column widths forward in source-PDF coordinates.
+  When the source places a table near the right margin - a classic
+  pattern is a form whose ``Yes``/``No`` checkbox grid lives on the
+  right of each item row - the indent plus the column widths often
+  push the table's right edge past the DOCX page margin. LibreOffice
+  and Word render only the visible slice and silently clip the
+  overflow, so the rightmost cells simply disappear. Observed on
+  Old_2_UT page 14: a ``6x2`` ``Applicable? (please tick)`` table at
+  ``tblInd=8662 twips`` and ``10584 twips`` wide on a section whose
+  content area is only ``10584 twips`` - the table's right edge
+  landed ``7760 twips`` past the page's right edge, and the entire
+  ``Yes``/``No`` column rendered blank. New post-emit pass
+  ``fit_oversized_tables()`` in ``pdf2docx_plus.emit.table_fit``: for
+  each ``<w:tbl>``, computes the enclosing section's content width,
+  reduces ``<w:tblInd>`` first (preserving the source's
+  right-alignment up to the point where the table would clip), and
+  proportionally scales every ``<w:gridCol>`` and ``<w:tcW>`` when
+  the table is still wider than the content area. Gated by the new
+  ``fit_wide_tables`` flag on ``convert()`` (default True).
+  ``ConversionResult`` now reports ``oversized_tables_fit``. Measured
+  impact: 31 tables adjusted on Old_2_UT (67 pages), 46 on New_UT_2
+  (69 pages); the ``Applicable?`` checkbox grids now render fully
+  within the page bounds with no content loss.
+- **Multi-row form/checkbox tables chopped down to the header.**
+  ``trim_empty_table_rows()`` used to strip every leading and
+  trailing all-empty row from every table, which destroyed
+  legitimate forms whose empty rows are the form - e.g. the SFC
+  Information Checklist's ``Applicable? (please tick)`` grids (6x2
+  / 8x2 / 9x2 in the source PDF collapsed to 2x2 in the DOCX,
+  leaving only the header and throwing away every row where the
+  applicant is expected to tick ``Yes`` / ``No``). The pass now
+  only trims when the table looks like a lattice detection
+  artifact: at most four rows with exactly one non-empty row. Form
+  tables with multiple legitimate empty rows are preserved
+  verbatim. Measured impact: Old_UT preserved 8x2, 9x2 and 14x2
+  checkbox grids that previously rendered as 2x2 stubs; rendered
+  page count stays within +6 of the 67-page source while restoring
+  the full structure of every checklist form.
+- **Large empty form-continuation tables dropped.**
+  ``drop_empty_tables()`` used to remove every table whose cells
+  are all empty, regardless of size. That cleared the checkbox
+  continuation grids that wrap a form's checklist items across
+  pages (e.g. a 14x2 empty grid on page 14 of the UT checklist was
+  the right-hand column of items 15-25 where the applicant ticks
+  ``Yes`` / ``No``). The pass now only drops fully-empty tables
+  with at most nine total cells (a 3x3 grid), which is still
+  enough to clean up underline-stroke and decorative-box lattice
+  artifacts. Tunable via the new ``max_cells`` keyword argument.
+
 ### Added
 
+- New post-emit pass `collapse_empty_sections()` in
+  `pdf2docx_plus.emit.sections`. Walks body-level paragraphs,
+  groups them per section boundary, and removes sections whose
+  content is empty (no ``<w:t>`` text, ``<w:drawing>``, ``<w:pict>``,
+  ``<w:object>``, or ``<w:tbl>``). The final section - which uses
+  the body-level ``<w:sectPr>`` - is always preserved. Gated by
+  the new `collapse_empty_sects` flag on `convert()`
+  (default True). `ConversionResult` now reports
+  `empty_sections_collapsed`. Measured impact: New_KFS 10-page
+  PDF dropped from 11 rendered pages to 10 (eliminated an orphan
+  blank page 2 caused by two consecutive empty sections).
+- Cell-merge crashguard for ``pdf2docx.table.Cell.make_docx``.
+  When the inferred span crosses an already-merged cell,
+  ``python-docx._Cell.merge()`` raises and upstream's page loop
+  abandons the whole source page ("Ignore page N due to making
+  page error"), dropping every block on that page. The guard
+  catches only the ``"Failed to merge"`` exception, logs at
+  WARNING, clears the span to 1x1 and retries so text, images,
+  and cell order survive. Measured impact: Old_AWHKEF page 7
+  (performance chart with stacked merged cells) now emits
+  content where it previously rendered blank; rendered page
+  count 8 -> 9, matching source.
 - New post-emit pass `repair_wrap_spacing()` in
   `pdf2docx_plus.emit.word_spacing`. When upstream concatenates text
   spans from lines that wrapped in the source PDF, the trailing
@@ -22,12 +96,21 @@
   word-glue repairs, five period-glue and two comma-glue defects
   eliminated, zero ``U.S.`` / ``e.g.`` false positives.
 - New post-emit pass `promote_page_numbers_to_footer()` in
-  `pdf2docx_plus.emit.page_footer`. Detects per-page footer body text
-  (``"N Last update: ..."``, bare page-number paragraphs, and
-  repeated footer lines) and rewrites them into a real ``w:footer``
-  with a right-aligned auto-updating ``PAGE`` field. Gated by the new
-  `promote_page_footer` flag on `convert()` (default True).
-  `ConversionResult` now reports `page_footer_lines_promoted`.
+  `pdf2docx_plus.emit.page_footer`. Two detection paths:
+  ``"N Last update: ..."`` footer lines (KFS-style - installs a
+  canonical right-aligned ``w:footer`` with ``Last update: ...``
+  text and an auto-updating ``PAGE`` field); and bare monotonic
+  page-number sequences that upstream emits as plain body
+  paragraphs (``"1", "2", ..., "N"`` scattered one-per-source-page
+  as in Explanatory Memoranda - strips the orphan digits from the
+  body without installing a new footer, since per-page sections
+  have tight margins and adding footer text re-inflates the page
+  count). Gated by the new `promote_page_footer` flag on
+  `convert()` (default True). `ConversionResult` now reports
+  `page_footer_lines_promoted`. Measured impact on First Sentier
+  PDFs: 56/50 body paragraphs promoted, eliminating 7-8
+  near-blank pages that previously held only the static page
+  number.
 - New post-emit pass `flatten_per_page_sections()` in
   `pdf2docx_plus.emit.sections`. Converts upstream's per-source-page
   `nextPage` section breaks to `continuous` so Word repaginates

@@ -24,10 +24,12 @@ from .page_breaks import insert_page_breaks
 from .page_footer import promote_page_numbers_to_footer
 from .sections import (
     clamp_paragraph_spacing,
+    collapse_empty_sections,
     fix_page_margins,
     flatten_per_page_sections,
     normalize_multi_column_sections,
 )
+from .table_fit import fit_oversized_tables
 from .tables_cleanup import (
     drop_empty_tables,
     merge_consecutive_single_row_tables,
@@ -41,8 +43,10 @@ __all__ = [
     "apply_lists",
     "clamp_paragraph_spacing",
     "collapse_empty_paragraphs",
+    "collapse_empty_sections",
     "drop_empty_tables",
     "extract_headers_footers",
+    "fit_oversized_tables",
     "fix_page_margins",
     "flatten_per_page_sections",
     "insert_page_breaks",

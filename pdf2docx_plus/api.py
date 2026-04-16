@@ -36,8 +36,10 @@ from .emit import (
     apply_lists,
     clamp_paragraph_spacing,
     collapse_empty_paragraphs,
+    collapse_empty_sections,
     drop_empty_tables,
     extract_headers_footers,
+    fit_oversized_tables,
     fix_page_margins,
     flatten_per_page_sections,
     insert_page_breaks,
@@ -102,6 +104,8 @@ class ConversionResult:
     sections_flattened: int = 0
     page_footer_lines_promoted: int = 0
     wrap_spaces_repaired: int = 0
+    empty_sections_collapsed: int = 0
+    oversized_tables_fit: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
     peak_rss_mb: float | None = None
@@ -201,8 +205,10 @@ class Converter:
         normalize_multi_col_sections: bool = True,
         flatten_sections: bool = False,
         cleanup_tiny_tables: bool = True,
+        fit_wide_tables: bool = True,
         promote_page_footer: bool = True,
         repair_soft_wrap_spacing: bool = True,
+        collapse_empty_sects: bool = True,
         explicit_page_breaks: bool = False,
         recover_missing_images: bool = False,
         rasterize_vector_graphics: bool = False,
@@ -240,6 +246,30 @@ class Converter:
             consolidate_adjacent_runs: merge adjacent `<w:r>` elements
                 with identical run-properties. Default True — safe,
                 improves editability.
+            fit_wide_tables: clamp table indent and column widths so
+                every table fits within its section's content area.
+                Upstream carries table ``<w:tblInd>`` and column
+                widths forward in source-PDF coordinates; when the
+                source PDF places a table near the right margin
+                (e.g. a right-aligned checkbox column on a form),
+                the indent plus column widths often push the right
+                edge past the DOCX page's right margin and
+                LibreOffice / Word simply clip the overflow - the
+                rightmost cells disappear. This pass reduces the
+                indent first, then scales grid columns and cell
+                widths proportionally if the table is still wider
+                than the content area. Default True.
+                ``ConversionResult`` reports
+                ``oversized_tables_fit``.
+            collapse_empty_sects: remove sections whose body contains
+                no visible content. Upstream occasionally emits empty
+                ``<w:sectPr>`` stubs between the real sections (common
+                on KFS-style documents where a header-detection
+                placeholder or a decorative break yields an orphan
+                section). Each empty section forces a page break, so
+                the reader sees a blank page for every stub. Default
+                True. ``ConversionResult`` reports
+                ``empty_sections_collapsed``.
             repair_soft_wrap_spacing: when upstream concatenates text
                 spans from lines that wrapped in the source PDF, the
                 trailing space is lost, producing word-glue like
@@ -253,12 +283,16 @@ class Converter:
                 preserved. Default True. ``ConversionResult`` reports
                 ``wrap_spaces_repaired``.
             promote_page_footer: detect per-page footer body text
-                (``"N Last update: 2 October 2024"`` etc.) and replace
-                with a real ``w:footer`` containing a right-aligned
-                auto-updating ``PAGE`` field. Default True — upstream
-                emits these footer lines as plain body paragraphs so
-                the page number is static and the footer text is
-                duplicated on every page.
+                and replace with a real ``w:footer`` containing a
+                right-aligned auto-updating ``PAGE`` field. Default
+                True. Two detection paths: ``"N Last update: ..."``
+                footer lines (KFS-style), and bare monotonic
+                page-number sequences (``"1", "2", ..., "N"``) that
+                upstream emits as plain body paragraphs — common in
+                Explanatory Memoranda. Without this pass, the static
+                page numbers never update when Word repaginates and
+                the orphan digits fall onto their own near-blank
+                pages, inflating the rendered page count.
             flatten_sections: convert per-page `nextPage` section
                 breaks to `continuous` so Word repaginates naturally.
                 **Default False** — preserves the source PDF's
@@ -333,8 +367,10 @@ class Converter:
             "normalize_sections": normalize_multi_col_sections,
             "flatten_sections": flatten_sections,
             "cleanup_tiny_tables": cleanup_tiny_tables,
+            "fit_wide_tables": fit_wide_tables,
             "promote_page_footer": promote_page_footer,
             "repair_soft_wrap_spacing": repair_soft_wrap_spacing,
+            "collapse_empty_sects": collapse_empty_sects,
             "explicit_page_breaks": explicit_page_breaks,
             "skip_images": skip_images,
             "recover_missing": recover_missing_images,
@@ -597,6 +633,14 @@ class Converter:
                             result.sections_flattened = flattened
                     except Exception as e:
                         _log.debug("section flattening skipped: %s", e)
+                if pp.get("fit_wide_tables"):
+                    try:
+                        fit = fit_oversized_tables(doc)
+                        if fit:
+                            dirty = True
+                            result.oversized_tables_fit = fit
+                    except Exception as e:
+                        _log.debug("table-fit skipped: %s", e)
                 if pp.get("cleanup_tiny_tables"):
                     try:
                         # run before merge/unwrap so empty grids don't get
@@ -628,6 +672,14 @@ class Converter:
                             result.page_footer_lines_promoted = promoted
                     except Exception as e:
                         _log.debug("page-footer promotion skipped: %s", e)
+                if pp.get("collapse_empty_sects"):
+                    try:
+                        collapsed = collapse_empty_sections(doc)
+                        if collapsed:
+                            dirty = True
+                            result.empty_sections_collapsed = collapsed
+                    except Exception as e:
+                        _log.debug("empty-section collapse skipped: %s", e)
                 if pp.get("explicit_page_breaks"):
                     try:
                         inserted = insert_page_breaks(doc)

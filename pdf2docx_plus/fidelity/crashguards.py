@@ -164,3 +164,54 @@ def _guard_blocks_sort():  # pragma: no cover - optional hook
 
 
 _guard_blocks_sort()
+
+
+# ---------------------------------------------------------------------------
+# Cell.merge() failures drop the whole source page
+# ---------------------------------------------------------------------------
+# ``pdf2docx.table.Cell.make_docx`` calls ``python-docx``'s
+# ``_Cell.merge`` to apply row/column spans inferred from the PDF
+# layout. When the inferred span crosses an adjacent cell that has
+# already been merged (e.g. stacked merged cells like the Old_AWHKEF
+# page-7 signature table), ``python-docx`` raises and the exception
+# propagates out of ``make_docx``. Upstream's page loop catches that
+# at the page level and abandons the whole page ("Ignore page N due
+# to making page error"), so the user loses all of that page's
+# content, not just the one misbehaving merge.
+#
+# Fix: wrap ``Cell.make_docx`` so a merge failure degrades to the
+# unmerged layout instead of killing the page. The spans look wrong
+# but the text, images, and cell order are preserved.
+import pdf2docx.table.Cell as _cell_mod  # noqa: E402
+
+
+def _install_cell_merge_guard() -> None:
+    orig = _cell_mod.Cell.make_docx
+
+    def _safe_make_docx(self, table, indexes):  # type: ignore[no-untyped-def]
+        try:
+            return orig(self, table, indexes)
+        except Exception as e:
+            msg = str(e)
+            if "Failed to merge" not in msg:
+                raise
+            _log.warning(
+                "cell merge failed at indexes=%s; emitting unmerged content (%s)",
+                indexes,
+                e,
+            )
+            # retry with a 1x1 span so the cell still emits its text
+            try:
+                self.merged_cells = (1, 1)
+            except AttributeError:  # pragma: no cover - defensive
+                pass
+            try:
+                return orig(self, table, indexes)
+            except Exception as e2:
+                _log.warning("cell emission still failed after skipping merge: %s", e2)
+                return None
+
+    _cell_mod.Cell.make_docx = _safe_make_docx
+
+
+_install_cell_merge_guard()
