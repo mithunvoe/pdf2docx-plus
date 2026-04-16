@@ -35,6 +35,7 @@ from .tables_cleanup import (
     unwrap_tiny_tables,
 )
 from .whitespace import collapse_empty_paragraphs
+from .word_spacing import repair_wrap_spacing
 
 __all__ = [
     "apply_lists",
@@ -48,6 +49,7 @@ __all__ = [
     "merge_consecutive_single_row_tables",
     "normalize_multi_column_sections",
     "promote_page_numbers_to_footer",
+    "repair_wrap_spacing",
     "trim_empty_table_rows",
     "unwrap_tiny_tables",
 ]

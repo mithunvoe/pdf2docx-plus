@@ -44,6 +44,7 @@ from .emit import (
     promote_page_numbers_to_footer,
     merge_consecutive_single_row_tables,
     normalize_multi_column_sections,
+    repair_wrap_spacing,
     trim_empty_table_rows,
     unwrap_tiny_tables,
 )
@@ -100,6 +101,7 @@ class ConversionResult:
     empty_table_rows_trimmed: int = 0
     sections_flattened: int = 0
     page_footer_lines_promoted: int = 0
+    wrap_spaces_repaired: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
     peak_rss_mb: float | None = None
@@ -200,6 +202,7 @@ class Converter:
         flatten_sections: bool = False,
         cleanup_tiny_tables: bool = True,
         promote_page_footer: bool = True,
+        repair_soft_wrap_spacing: bool = True,
         explicit_page_breaks: bool = False,
         recover_missing_images: bool = False,
         rasterize_vector_graphics: bool = False,
@@ -237,6 +240,18 @@ class Converter:
             consolidate_adjacent_runs: merge adjacent `<w:r>` elements
                 with identical run-properties. Default True — safe,
                 improves editability.
+            repair_soft_wrap_spacing: when upstream concatenates text
+                spans from lines that wrapped in the source PDF, the
+                trailing space is lost, producing word-glue like
+                ``"confirms,having"`` or ``"Sub-Fund.The"``. This pass
+                inspects adjacent ``<w:r>`` siblings inside each
+                paragraph and inserts a single space when the left
+                run ends with sentence-break punctuation (``,;:?!)``
+                or a word-ending period) and the right run begins
+                with a letter. Single-letter initials (``U.S.``,
+                ``e.g.``) and hyphenated runs are deliberately
+                preserved. Default True. ``ConversionResult`` reports
+                ``wrap_spaces_repaired``.
             promote_page_footer: detect per-page footer body text
                 (``"N Last update: 2 October 2024"`` etc.) and replace
                 with a real ``w:footer`` containing a right-aligned
@@ -319,6 +334,7 @@ class Converter:
             "flatten_sections": flatten_sections,
             "cleanup_tiny_tables": cleanup_tiny_tables,
             "promote_page_footer": promote_page_footer,
+            "repair_soft_wrap_spacing": repair_soft_wrap_spacing,
             "explicit_page_breaks": explicit_page_breaks,
             "skip_images": skip_images,
             "recover_missing": recover_missing_images,
@@ -534,6 +550,14 @@ class Converter:
                             dirty = True
                     except Exception as e:
                         _log.debug("extract_headers_footers skipped: %s", e)
+                if pp.get("repair_soft_wrap_spacing"):
+                    try:
+                        repaired = repair_wrap_spacing(doc)
+                        if repaired:
+                            dirty = True
+                            result.wrap_spaces_repaired = repaired
+                    except Exception as e:
+                        _log.debug("wrap-spacing repair skipped: %s", e)
                 if pp.get("consolidate"):
                     try:
                         merged = consolidate_runs(doc)

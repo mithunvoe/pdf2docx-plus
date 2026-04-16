@@ -4,6 +4,23 @@
 
 ### Added
 
+- New post-emit pass `repair_wrap_spacing()` in
+  `pdf2docx_plus.emit.word_spacing`. When upstream concatenates text
+  spans from lines that wrapped in the source PDF, the trailing
+  space at the line break is dropped, yielding word-glue like
+  ``"confirms,having"`` and ``"Sub-Fund.The"``. The new pass walks
+  every paragraph (including table cells), inspects adjacent
+  ``<w:r>`` siblings, and inserts a single space when the left run
+  ends with sentence-break punctuation (``,;:?!)`` or a word-ending
+  period) and the right run begins with a letter. Single-letter
+  initials (``U.S.``, ``e.g.``), mid-word hyphens, runs separated by
+  explicit ``<w:br/>``/``<w:tab/>``, and runs already bracketed by
+  whitespace are preserved. Gated by the new
+  `repair_soft_wrap_spacing` flag on `convert()` (default True).
+  `ConversionResult` now reports `wrap_spaces_repaired`. Measured
+  impact on First Sentier PDFs (58- and 59-page funds): 27 real
+  word-glue repairs, five period-glue and two comma-glue defects
+  eliminated, zero ``U.S.`` / ``e.g.`` false positives.
 - New post-emit pass `promote_page_numbers_to_footer()` in
   `pdf2docx_plus.emit.page_footer`. Detects per-page footer body text
   (``"N Last update: ..."``, bare page-number paragraphs, and
