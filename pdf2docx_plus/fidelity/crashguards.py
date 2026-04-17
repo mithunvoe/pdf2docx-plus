@@ -39,7 +39,7 @@ _log = get_logger("fidelity.crashguards")
 # ---------------------------------------------------------------------------
 # #329 / #330: hex parse crash on malformed colours
 # ---------------------------------------------------------------------------
-import pdf2docx.common.share as _share  # noqa: E402
+import pdf2docx_plus._vendored.pdf2docx.common.share as _share  # noqa: E402
 
 _orig_rgb_component = _share.rgb_component
 
@@ -100,7 +100,7 @@ _install_rect_area_shim()
 # ---------------------------------------------------------------------------
 # #201 / #183 / #328: drawings / colourspace crashes
 # ---------------------------------------------------------------------------
-import pdf2docx.page.RawPageFitz as _rawpage  # noqa: E402
+import pdf2docx_plus._vendored.pdf2docx.page.RawPageFitz as _rawpage  # noqa: E402
 
 _orig_init_paths = _rawpage.RawPageFitz._init_paths
 
@@ -114,7 +114,7 @@ def _safe_init_paths(self, **settings: Any) -> Any:
             getattr(self, "page_id", "?"),
             e,
         )
-        from pdf2docx.shape.Paths import Paths
+        from pdf2docx_plus._vendored.pdf2docx.shape.Paths import Paths
 
         return Paths(parent=self)
 
@@ -125,7 +125,7 @@ _rawpage.RawPageFitz._init_paths = _safe_init_paths
 # ---------------------------------------------------------------------------
 # #198: a single unhandleable image kills the whole page
 # ---------------------------------------------------------------------------
-import pdf2docx.image.ImagesExtractor as _imgext  # noqa: E402
+import pdf2docx_plus._vendored.pdf2docx.image.ImagesExtractor as _imgext  # noqa: E402
 
 _orig_extract_images = _imgext.ImagesExtractor.extract_images
 
@@ -182,7 +182,7 @@ _guard_blocks_sort()
 # Fix: wrap ``Cell.make_docx`` so a merge failure degrades to the
 # unmerged layout instead of killing the page. The spans look wrong
 # but the text, images, and cell order are preserved.
-import pdf2docx.table.Cell as _cell_mod  # noqa: E402
+import pdf2docx_plus._vendored.pdf2docx.table.Cell as _cell_mod  # noqa: E402
 
 
 def _install_cell_merge_guard() -> None:

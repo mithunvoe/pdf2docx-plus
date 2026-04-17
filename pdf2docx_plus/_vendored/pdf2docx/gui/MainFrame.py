@@ -3,7 +3,7 @@
 import os
 from tkinter import Tk, Frame, Label, Entry, Button, filedialog, messagebox
 import webbrowser
-from pdf2docx import Converter
+from .. import Converter
 
 
 class MainFrame(Frame):

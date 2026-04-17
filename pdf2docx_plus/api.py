@@ -146,7 +146,7 @@ class Converter:
                 raise InputError(f"PDF not found: {pdf_file}")
 
         silence_upstream()
-        from pdf2docx.converter import Converter as _UpstreamConverter
+        from pdf2docx_plus._vendored.pdf2docx.converter import Converter as _UpstreamConverter
 
         try:
             self._inner = _UpstreamConverter(pdf_file=pdf_file, password=password, stream=stream)

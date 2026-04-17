@@ -9,7 +9,7 @@ inventory installed.
 
 from __future__ import annotations
 
-import pdf2docx.converter as _upstream
+import pdf2docx_plus._vendored.pdf2docx.converter as _upstream
 
 from ..styles import new_document
 

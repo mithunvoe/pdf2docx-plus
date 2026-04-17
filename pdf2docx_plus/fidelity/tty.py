@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-import pdf2docx.converter as _upstream
+import pdf2docx_plus._vendored.pdf2docx.converter as _upstream
 
 
 def _color_output(msg: str) -> str:

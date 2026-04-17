@@ -39,7 +39,7 @@ def test_paragraph_add_run_sanitises() -> None:
 @pytest.mark.unit
 def test_add_hyperlink_is_paragraph_level() -> None:
     """Post-patch, <w:hyperlink> must be a direct child of <w:p>, not <w:r>."""
-    from pdf2docx.common.docx import add_hyperlink
+    from pdf2docx_plus._vendored.pdf2docx.common.docx import add_hyperlink
 
     doc = Document()
     p = doc.add_paragraph()

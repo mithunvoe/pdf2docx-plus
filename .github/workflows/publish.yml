@@ -1,127 +1,99 @@
-# Create release and publish to Pypi when pushing tags
+name: release
 
-name: publish
+# Auto-bumps the patch version, tags, and publishes to PyPI on every push to main.
+# Uses PyPI Trusted Publishing (OIDC) -- no API tokens in secrets.
+#
+# Skips itself when the pushed commit was the bot's own version-bump commit,
+# so we don't loop.
 
-# Trigger the workflow on push tags, matching vM.n.p, i.e. v3.2.10
-on:  
+on:
   push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+    branches: [main]
 
-# Jobs to do:
-# - build package
-# - create release with asset
-# - publish to Pypi
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-
-  # -----------------------------------------------------------
-  # create python env and setup package
-  # -----------------------------------------------------------
-  build:
-
-    # The type of runner that the job will run on
+  test:
+    # Release gate: tests must pass. Lint/format/type are enforced in ci.yml
+    # on PRs -- keeping them out of the release path so style issues never
+    # block a publish.
+    if: "!contains(github.event.head_commit.message, 'chore: release v')"
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - name: Check out code
-        uses: actions/checkout@v2
-
-      - name: Set up Python 3.x
-        uses: actions/setup-python@v1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
-      - name: Display Python version
-        run: python -c "import sys; print(sys.version)"
-
-      - name: Install dependencies
+          python-version: "3.12"
+      - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel pytest
+          pip install -e ".[dev]"
+      - name: Tests
+        run: pytest -q
 
-      # build package for tags, e.g. 3.2.1 extracted from 'refs/tags/v3.2.1'
-      - name: Build package
-        run: |
-          echo ${GITHUB_REF#refs/tags/v} > version.txt
-          python setup.py sdist --formats=gztar,zip
-          python setup.py bdist_wheel
-
-      # test wheel file locally
-      - name: Test package
-        run: |
-          pip install ./dist/*.whl
-          cd test
-          pytest -v test.py::TestConversion
-
-      # upload the artifacts for further jobs
-      # - app-tag.tar.gz
-      # - app-tag.zip
-      # - app-tag-info.whl
-      - name: Archive package
-        uses: actions/upload-artifact@v4
-        with:
-            name: dist
-            path: ./dist
-  
-  # -----------------------------------------------------------
-  # create release and upload asset
-  # -----------------------------------------------------------
   release:
+    needs: test
     runs-on: ubuntu-latest
-
-    # Run this job after build completes successfully
-    needs: build
-
+    environment: pypi
+    permissions:
+      contents: write      # push the bump commit + tag
+      id-token: write      # PyPI trusted publishing
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      # download artifacts from job: build
-      - name: Download artifacts from build
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: dist
-          path: dist
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # create release and upload assets
-      - name: Create release with assets
-        uses: softprops/action-gh-release@v1
+      - uses: actions/setup-python@v5
         with:
-          files: |
-            ./dist/*.tar.gz
-            ./dist/*.zip
-            ./dist/*.whl
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          python-version: "3.12"
 
+      - name: Bump patch version
+        id: bump
+        run: |
+          python -m pip install --upgrade pip tomlkit
+          python - <<'PY'
+          import os, re, pathlib, tomlkit
+          p = pathlib.Path("pyproject.toml")
+          doc = tomlkit.parse(p.read_text())
+          current = str(doc["project"]["version"])
+          # Strip any prerelease/dev suffix (0.6.0a6 -> 0.6.0) then bump patch.
+          m = re.match(r"^(\d+)\.(\d+)\.(\d+)", current)
+          if not m:
+              raise SystemExit(f"cannot parse version: {current!r}")
+          major, minor, patch = map(int, m.groups())
+          has_prerelease = len(current) > m.end()
+          new = f"{major}.{minor}.{patch}" if has_prerelease else f"{major}.{minor}.{patch + 1}"
+          doc["project"]["version"] = new
+          p.write_text(tomlkit.dumps(doc))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version={new}\n")
+          print(f"{current} -> {new}")
+          PY
 
-  # -----------------------------------------------------------
-  # publish to Pypi
-  # -----------------------------------------------------------
-  publish:
-    runs-on: ubuntu-latest
+      - name: Commit, tag, and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: release v${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin main --follow-tags
 
-    # Run this job after both build and release completes successfully
-    needs: [build, release]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Download artifacts from release
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist
-
-      # Error when two sdist files created in build job are uploaded to Pipi:
-      # HTTPError: 400 Bad Request from https://upload.pypi.org/legacy/
-      # Only one sdist may be uploaded per release.
-      - name: Remove duplicated sdist
-        run: rm ./dist/*.zip
+      - name: Build sdist and wheel
+        run: |
+          pip install --upgrade build twine
+          python -m build
+          twine check dist/*
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@master
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
         with:
-          password: ${{ secrets.PYPI_PASSWORD }}
+          tag_name: "v${{ steps.bump.outputs.version }}"
+          files: dist/*
+          generate_release_notes: true

@@ -22,7 +22,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.text.run import Run
 
-import pdf2docx.common.docx as _upstream
+import pdf2docx_plus._vendored.pdf2docx.common.docx as _upstream
 
 
 def _add_hyperlink(paragraph, url: str, text: str) -> Run:
