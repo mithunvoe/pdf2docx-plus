@@ -33,6 +33,7 @@ from typing import IO, Any
 from . import fidelity  # noqa: F401  (install monkey-patches on import)
 from .consolidate import consolidate_runs
 from .emit import (
+    align_tblgrid_to_cells,
     apply_lists,
     clamp_paragraph_spacing,
     collapse_empty_paragraphs,
@@ -106,6 +107,7 @@ class ConversionResult:
     wrap_spaces_repaired: int = 0
     empty_sections_collapsed: int = 0
     oversized_tables_fit: int = 0
+    tblgrids_aligned: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
     peak_rss_mb: float | None = None
@@ -246,21 +248,23 @@ class Converter:
             consolidate_adjacent_runs: merge adjacent `<w:r>` elements
                 with identical run-properties. Default True — safe,
                 improves editability.
-            fit_wide_tables: clamp table indent and column widths so
-                every table fits within its section's content area.
-                Upstream carries table ``<w:tblInd>`` and column
-                widths forward in source-PDF coordinates; when the
-                source PDF places a table near the right margin
-                (e.g. a right-aligned checkbox column on a form),
-                the indent plus column widths often push the right
-                edge past the DOCX page's right margin and
-                LibreOffice / Word simply clip the overflow - the
-                rightmost cells disappear. This pass reduces the
-                indent first, then scales grid columns and cell
-                widths proportionally if the table is still wider
-                than the content area. Default True.
+            fit_wide_tables: two related table-geometry fixes.
+                First, ``align_tblgrid_to_cells()`` rewrites each
+                ``<w:tblGrid>`` from the authoritative per-cell
+                ``<w:tcW>`` values. Upstream sometimes emits equal
+                grid columns even when the underlying cells carry
+                non-uniform widths; with ``tblLayout="fixed"``
+                LibreOffice honours the grid over the cells, so
+                columns like a narrow row-number column or a wide
+                "Answer" column end up the same width - and the
+                wide column's paragraphs wrap far tighter than in
+                the source PDF. Second,
+                ``fit_oversized_tables()`` clamps ``<w:tblInd>``
+                and proportionally scales grid/cell widths so the
+                table fits the section's content area instead of
+                being clipped past the right margin. Default True.
                 ``ConversionResult`` reports
-                ``oversized_tables_fit``.
+                ``tblgrids_aligned`` and ``oversized_tables_fit``.
             collapse_empty_sects: remove sections whose body contains
                 no visible content. Upstream occasionally emits empty
                 ``<w:sectPr>`` stubs between the real sections (common
@@ -634,6 +638,13 @@ class Converter:
                     except Exception as e:
                         _log.debug("section flattening skipped: %s", e)
                 if pp.get("fit_wide_tables"):
+                    try:
+                        aligned = align_tblgrid_to_cells(doc)
+                        if aligned:
+                            dirty = True
+                            result.tblgrids_aligned = aligned
+                    except Exception as e:
+                        _log.debug("tblgrid alignment skipped: %s", e)
                     try:
                         fit = fit_oversized_tables(doc)
                         if fit:

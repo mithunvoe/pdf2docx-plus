@@ -4,6 +4,29 @@
 
 ### Fixed
 
+- **Columns rendered at equal widths despite the cells carrying
+  non-uniform widths.** Upstream sometimes emits ``<w:tblGrid>``
+  with evenly-divided columns even when the underlying cells
+  declare correct, non-uniform widths via ``<w:tcW w:type="dxa">``.
+  With ``tblLayout="fixed"`` LibreOffice honours the grid over the
+  cells, so a 3-column Q&A table whose cells are
+  ``[1494, 4644, 8002]`` twips ends up rendered at
+  ``[4722, 4722, 4722]``. The narrow row-number column gets
+  over-wide and the wide "Answer" column shrinks - long answers
+  wrap many more times than in the source and eventually clip.
+  New pass ``align_tblgrid_to_cells()`` in
+  ``pdf2docx_plus.emit.table_fit``: selects the widest row whose
+  cells are all unspanned and have valid ``dxa`` widths, and
+  rewrites ``<w:tblGrid>`` from those widths. Skipped when grid
+  distribution already matches the canonical row, when no suitable
+  canonical row exists, or when the row's cell count differs from
+  the grid's column count. Gated by the same ``fit_wide_tables``
+  flag as ``fit_oversized_tables`` (default True).
+  ``ConversionResult`` now reports ``tblgrids_aligned``. Measured
+  impact: 42 tables rewritten on the 42-page New_FAQ document so
+  every Q&A row renders with the source's narrow / medium / wide
+  column proportions; answer-column text now wraps at the same
+  width as the source PDF.
 - **Tables clipped off the right edge of the page.** Upstream carries
   ``<w:tblInd>`` and column widths forward in source-PDF coordinates.
   When the source places a table near the right margin - a classic

@@ -22,6 +22,7 @@ assert _SPEC and _SPEC.loader
 _MOD = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MOD)
 fit_oversized_tables = _MOD.fit_oversized_tables
+align_tblgrid_to_cells = _MOD.align_tblgrid_to_cells
 
 
 def _set_page(doc, *, width_twips=11906, left_twips=720, right_twips=720) -> None:
@@ -190,3 +191,111 @@ def test_skips_tables_without_grid() -> None:
     tbl._element.remove(grid)
     fixed = fit_oversized_tables(doc)
     assert fixed == 0
+
+
+# -- align_tblgrid_to_cells ----------------------------------------------------
+
+
+def _set_row_cell_widths(tbl, row_idx: int, widths: list[int]) -> None:
+    """Overwrite each cell's ``<w:tcW>`` on the given row."""
+    row = tbl.rows[row_idx]
+    for i, cell in enumerate(row.cells):
+        tcPr = cell._tc.find(qn("w:tcPr"))
+        if tcPr is None:
+            tcPr = OxmlElement("w:tcPr")
+            cell._tc.insert(0, tcPr)
+        tcW = tcPr.find(qn("w:tcW"))
+        if tcW is None:
+            tcW = OxmlElement("w:tcW")
+            tcPr.append(tcW)
+        tcW.set(qn("w:w"), str(widths[i]))
+        tcW.set(qn("w:type"), "dxa")
+
+
+@pytest.mark.unit
+def test_align_grid_rewrites_uniform_grid_from_cells() -> None:
+    """Upstream's signature: grid [4723,4723,4723] but cells
+    [1494,4644,8002] - grid should be rewritten to match cells."""
+    doc = Document()
+    # build 3-col table with equal grid but unequal cell widths
+    tbl = _add_table(doc, col_widths=[4723, 4723, 4723], tbl_ind=0)
+    tbl_proxy = doc.tables[-1]
+    _set_row_cell_widths(tbl_proxy, 0, [1494, 4644, 8002])
+
+    rewritten = align_tblgrid_to_cells(doc)
+
+    assert rewritten == 1
+    assert _grid_widths(tbl) == [1494, 4644, 8002]
+
+
+@pytest.mark.unit
+def test_align_grid_noop_when_distribution_already_matches() -> None:
+    doc = Document()
+    tbl = _add_table(doc, col_widths=[1500, 4600, 8000], tbl_ind=0)
+    tbl_proxy = doc.tables[-1]
+    _set_row_cell_widths(tbl_proxy, 0, [1500, 4600, 8000])
+    rewritten = align_tblgrid_to_cells(doc)
+    assert rewritten == 0
+
+
+@pytest.mark.unit
+def test_align_grid_ignores_rows_with_gridspan() -> None:
+    """A fully-spanned row must not be used as the canonical source -
+    its cell widths represent a merge, not the grid structure."""
+    doc = Document()
+    tbl = _add_table(doc, col_widths=[4723, 4723, 4723], tbl_ind=0)
+    tbl_proxy = doc.tables[-1]
+    # row 0: normal cells
+    _set_row_cell_widths(tbl_proxy, 0, [1494, 4644, 8002])
+
+    # add a second row with a gridSpan=3 merged cell
+    tr = OxmlElement("w:tr")
+    tc = OxmlElement("w:tc")
+    tcPr = OxmlElement("w:tcPr")
+    tcW = OxmlElement("w:tcW")
+    tcW.set(qn("w:w"), "14166")
+    tcW.set(qn("w:type"), "dxa")
+    tcPr.append(tcW)
+    span = OxmlElement("w:gridSpan")
+    span.set(qn("w:val"), "3")
+    tcPr.append(span)
+    tc.append(tcPr)
+    tr.append(tc)
+    tbl.append(tr)
+
+    rewritten = align_tblgrid_to_cells(doc)
+    assert rewritten == 1
+    # grid must come from the canonical unspanned row, not the merged one
+    assert _grid_widths(tbl) == [1494, 4644, 8002]
+
+
+@pytest.mark.unit
+def test_align_grid_skips_when_no_unspanned_row() -> None:
+    """A table whose every row is merged has no source of truth; skip."""
+    doc = Document()
+    tbl = _add_table(doc, col_widths=[4000, 4000], tbl_ind=0)
+    tbl_proxy = doc.tables[-1]
+    # mark the only row as fully spanned
+    row_cells = tbl.find(qn("w:tr")).findall(qn("w:tc"))
+    tcPr = row_cells[0].find(qn("w:tcPr"))
+    span = OxmlElement("w:gridSpan")
+    span.set(qn("w:val"), "2")
+    tcPr.append(span)
+
+    rewritten = align_tblgrid_to_cells(doc)
+    assert rewritten == 0
+
+
+@pytest.mark.unit
+def test_align_grid_skips_when_cell_count_differs() -> None:
+    """Row cell count differs from grid col count (rare, but
+    possible after content manipulation). Do not touch the grid."""
+    doc = Document()
+    tbl = _add_table(doc, col_widths=[2000, 2000, 2000], tbl_ind=0)
+    tbl_proxy = doc.tables[-1]
+    # remove the third cell from row 0
+    row_cells = tbl.find(qn("w:tr")).findall(qn("w:tc"))
+    row_cells[-1].getparent().remove(row_cells[-1])
+    # row now has 2 cells; grid has 3
+    rewritten = align_tblgrid_to_cells(doc)
+    assert rewritten == 0

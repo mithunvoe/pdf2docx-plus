@@ -1,46 +1,144 @@
-"""Clamp table indent and column widths so tables fit the page.
+"""Keep table grids consistent with cell widths, and keep both
+inside the page's content area.
 
-Upstream ``pdf2docx`` carries column widths and table indents forward
-in the source PDF's coordinate system. When the source layout places
-the table close to the right-hand margin (a classic pattern is a
-form where the left side holds item text and the right side holds a
-``Yes`` / ``No`` checkbox grid), upstream emits the table with a
-large ``<w:tblInd>`` so the table's left edge sits exactly where it
-was in the PDF. If the DOCX section margins end up slightly wider
-than the PDF's, the indent plus the column widths push the table's
-right edge past the page's right margin, and the renderer
-(LibreOffice, Word) simply **clips** the overflow.
+Two issues are fixed here:
 
-Concrete signature seen in Old_2_UT page 14:
+1. **Mismatched ``<w:tblGrid>`` vs ``<w:tcW>``.** Upstream sometimes
+   emits ``<w:tblGrid>`` with evenly-divided columns even when the
+   individual cells have specific, non-uniform widths (e.g. a 3-column
+   Q&A table whose cells are 1494 / 4644 / 8002 twips but whose grid
+   declares 4723 / 4723 / 4723). With ``tblLayout="fixed"`` LibreOffice
+   honours ``<w:tblGrid>``, rendering the table with equal columns -
+   the long "Answer" column ends up narrow and its paragraphs wrap
+   much tighter than in the source PDF. ``align_tblgrid_to_cells()``
+   rewrites the grid from the authoritative cell widths of the
+   widest non-span row.
 
-  * Section 12: ``pgSz w=11906 twips`` (A4), margins ``left=420
-    right=902`` -> content width ``= 10584 twips``
-  * Table 1: ``tblInd w=8662``, ``tblGrid`` of two ``5292`` cols
-    (total 10584) -> table ends at ``420 + 8662 + 10584 = 19666``,
-    which is ``7760`` twips past the page's ``11906`` right edge.
+2. **Table extends past the page's right edge.** Upstream carries
+   ``<w:tblInd>`` and column widths forward in source-PDF coordinates.
+   When the resulting position plus total column width exceeds the
+   DOCX section's content area, LibreOffice / Word silently clip the
+   overflow. ``fit_oversized_tables()`` reduces the indent first and
+   then proportionally scales grid and cell widths.
 
-LibreOffice renders the visible slice only, so the right-hand
-``Yes``/``No`` cells disappear and the item-text column looks
-mysteriously narrow. The data is present in the XML but invisible.
-
-This pass walks every ``<w:tbl>``, works out the enclosing section's
-content width, and, when a table overflows:
-
-  1. first **reduces ``tblInd``** so the table's right edge sits at
-     the content area's right edge (preserving the source's
-     right-alignment as far as possible without clipping);
-  2. if the total column width alone still exceeds the content area,
-     **scales every ``<w:gridCol>`` and ``<w:tcW>``** proportionally
-     to fit.
-
-Returns the number of tables adjusted.
+Both passes are pure post-emit XML rewrites with no dependency on
+``fitz``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+
+
+def align_tblgrid_to_cells(document: Any) -> int:
+    """Rewrite each table's ``<w:tblGrid>`` to match the actual cell
+    widths emitted on a non-span row.
+
+    Selects the canonical row as the row with the largest number of
+    cells whose ``<w:gridSpan>`` is 1 (or missing) *and* that exposes
+    a valid ``<w:tcW w:type="dxa">`` on every cell. This is the
+    natural source of truth: upstream wrote the cell widths from the
+    source PDF's layout but then emitted a uniform grid, and the
+    renderer honours the grid.
+
+    Returns the number of tables whose grid was rewritten. No-ops for
+    tables where no canonical row can be found (e.g. every row has
+    merged cells or missing ``<w:tcW>``).
+    """
+    body = document.element.body
+    rewritten = 0
+    for tbl in body.iter(qn("w:tbl")):
+        if _rewrite_grid_from_cells(tbl):
+            rewritten += 1
+    return rewritten
+
+
+def _rewrite_grid_from_cells(tbl: Any) -> bool:
+    grid = tbl.find(qn("w:tblGrid"))
+    if grid is None:
+        return False
+    grid_cols = grid.findall(qn("w:gridCol"))
+    grid_widths = [_int_or_none(gc.get(qn("w:w"))) for gc in grid_cols]
+    if not grid_widths or any(w is None for w in grid_widths):
+        return False
+
+    canonical: list[int] | None = None
+    for tr in tbl.findall(qn("w:tr")):
+        row_widths = _unspanned_row_widths(tr)
+        if row_widths is None:
+            continue
+        if len(row_widths) != len(grid_widths):
+            continue
+        if canonical is None or sum(row_widths) > sum(canonical):
+            canonical = row_widths
+
+    if canonical is None:
+        return False
+
+    # only rewrite when the grid distribution differs meaningfully.
+    # Matching totals with a different per-column split is the
+    # signature we want to correct.
+    if _distribution_matches(grid_widths, canonical):
+        return False
+
+    for gc, w in zip(grid_cols, canonical):
+        gc.set(qn("w:w"), str(w))
+    return True
+
+
+def _unspanned_row_widths(tr: Any) -> list[int] | None:
+    """Return the cell widths for a row whose every cell is a single
+    grid column (no ``<w:gridSpan>`` > 1). Returns ``None`` if any
+    cell has a span or lacks a ``dxa`` width."""
+    cells = tr.findall(qn("w:tc"))
+    widths: list[int] = []
+    for tc in cells:
+        tcPr = tc.find(qn("w:tcPr"))
+        if tcPr is None:
+            return None
+        span = tcPr.find(qn("w:gridSpan"))
+        if span is not None:
+            try:
+                if int(span.get(qn("w:val")) or 1) > 1:
+                    return None
+            except ValueError:
+                return None
+        tcW = tcPr.find(qn("w:tcW"))
+        if tcW is None:
+            return None
+        if tcW.get(qn("w:type")) != "dxa":
+            return None
+        w = _int_or_none(tcW.get(qn("w:w")))
+        if w is None or w <= 0:
+            return None
+        widths.append(w)
+    return widths or None
+
+
+def _distribution_matches(a: list[int], b: list[int], *, tol: float = 0.02) -> bool:
+    """Two width vectors match when each pair is within ``tol`` of
+    the larger value (default 2%)."""
+    if len(a) != len(b):
+        return False
+    for x, y in zip(a, b):
+        base = max(x, y)
+        if base == 0:
+            continue
+        if abs(x - y) / base > tol:
+            return False
+    return True
+
+
+def _int_or_none(val: Any) -> int | None:
+    if val is None:
+        return None
+    try:
+        return int(float(val))
+    except (TypeError, ValueError):
+        return None
 
 
 def fit_oversized_tables(document: Any) -> int:

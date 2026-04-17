@@ -29,7 +29,7 @@ from .sections import (
     flatten_per_page_sections,
     normalize_multi_column_sections,
 )
-from .table_fit import fit_oversized_tables
+from .table_fit import align_tblgrid_to_cells, fit_oversized_tables
 from .tables_cleanup import (
     drop_empty_tables,
     merge_consecutive_single_row_tables,
@@ -40,6 +40,7 @@ from .whitespace import collapse_empty_paragraphs
 from .word_spacing import repair_wrap_spacing
 
 __all__ = [
+    "align_tblgrid_to_cells",
     "apply_lists",
     "clamp_paragraph_spacing",
     "collapse_empty_paragraphs",
