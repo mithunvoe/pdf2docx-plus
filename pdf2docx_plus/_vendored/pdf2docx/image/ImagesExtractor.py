@@ -107,10 +107,44 @@ class ImagesExtractor:
             a, b, c, d = matrix.a, matrix.b, matrix.c, matrix.d
         except AttributeError:
             return 0
+        # A negative determinant means the matrix also flips the image
+        # (PDF raster images are commonly placed with a Y-flip so their
+        # pixel origin lines up with PDF's y-down CS). Normalise the flip
+        # out here so the rotation computed from atan2 matches the flipped
+        # pixmap's rotation relative to its final on-page orientation.
+        if a * d - b * c < 0:
+            b = -b
         # Round to nearest 90 degrees using atan2
         angle_rad = math.atan2(b, a)
         angle_deg = round(math.degrees(angle_rad) / 90) * 90
         return int(angle_deg % 360)
+
+    @staticmethod
+    def _has_image_flip(matrix) -> bool:
+        """Detect whether the image is mirrored (reflected) by the matrix.
+
+        A PDF image transform with ``det < 0`` mirrors the source pixmap; a
+        positive determinant preserves handedness (pure rotation + scale).
+        PyMuPDF's ``fitz.Pixmap(doc, xref)`` returns the stored pixels, so
+        we must apply the same flip when reusing the pixmap in a DOCX.
+        """
+        if matrix is None:
+            return False
+        try:
+            a, b, c, d = matrix.a, matrix.b, matrix.c, matrix.d
+        except AttributeError:
+            return False
+        return (a * d - b * c) < 0
+
+    @staticmethod
+    def _flip_image_vertically(pixmap):
+        """Return PNG bytes of ``pixmap`` flipped along the horizontal axis."""
+        import cv2 as cv
+
+        img = ImagesExtractor._pixmap_to_cv_image(pixmap)
+        flipped = cv.flip(img, 0)
+        _, im_png = cv.imencode(".png", flipped)
+        return im_png.tobytes()
 
     def extract_images(self, clip_image_res_ratio: float = 3.0):
         """Extract normal images with ``Page.get_images()``.
@@ -161,15 +195,17 @@ class ImagesExtractor:
                 if not unrotated_page_bbox.intersects(bbox):
                     continue
 
-                # extract per-image rotation from transform matrix
+                # extract per-image rotation and mirroring from transform matrix
                 image_rotation = 0
+                image_flip = False
                 if i < len(rects_with_transform):
                     entry = rects_with_transform[i]
                     if isinstance(entry, (list, tuple)) and len(entry) >= 2:
                         matrix_t = entry[1]
                         image_rotation = self._get_image_rotation(matrix_t)
+                        image_flip = self._has_image_flip(matrix_t)
 
-                ic.append((bbox, item, image_rotation))
+                ic.append((bbox, item, image_rotation, image_flip))
 
         # step 2: group by intersection
         fun = lambda a, b: a[0].intersects(b[0])
@@ -181,14 +217,14 @@ class ImagesExtractor:
             # clip page with the union bbox of all intersected images
             if len(group) > 1:
                 clip_bbox = fitz.Rect()
-                for bbox, item, _ in group:
-                    clip_bbox |= bbox
+                for entry in group:
+                    clip_bbox |= entry[0]
                 raw_dict = self.clip_page_to_dict(
                     clip_bbox, False, clip_image_res_ratio
                 )
 
             else:
-                bbox, item, image_rotation = group[0]
+                bbox, item, image_rotation, image_flip = group[0]
 
                 # Regarding images consist of alpha values only, the turquoise color shown in
                 # the PDF is not part of the image, but part of PDF background.
@@ -215,12 +251,32 @@ class ImagesExtractor:
                     # recover image, e.g., handle image with mask, or CMYK color space
                     pix = self._recover_pixmap(doc, item)
 
-                    # rotate image: apply inverse of per-image transform, then page rotation
-                    # (PyMuPDF matrix maps image->page; correct pixmap with inverse: apply -angle)
+                    # Rotate raw pixmap to match its final visual orientation.
+                    # - ``image_rotation`` from the per-image PDF matrix is in
+                    #   CW degrees (the matrix maps image-space to un-rotated
+                    #   page-space).
+                    # - ``rotation`` (page.rotation) is the CW angle applied at
+                    #   display time.
+                    # - ``image_flip`` is True when the matrix also mirrors
+                    #   the image (det < 0). PDF raster images are commonly
+                    #   placed with a Y-flip so their pixel origin aligns
+                    #   with PDF's y-down CS; ``fitz.Pixmap(doc, xref)``
+                    #   returns the stored pixels, so we must re-apply the
+                    #   flip before emitting into the DOCX.
+                    # Total visual CW rotation of the raw pixmap relative to
+                    # its stored orientation is image_rotation + page_rotation.
+                    # OpenCV ``getRotationMatrix2D`` uses CCW-positive degrees,
+                    # so negate to get a CW rotation.
                     raw_dict = self._to_raw_dict(pix, bbox)
-                    total_rotation = (rotation or 0) - image_rotation
-                    if total_rotation:
-                        raw_dict["image"] = self._rotate_image(pix, total_rotation)
+                    visual_rotation = (image_rotation + (rotation or 0)) % 360
+                    current_pix = pix
+                    if image_flip:
+                        raw_dict["image"] = self._flip_image_vertically(current_pix)
+                        if visual_rotation:
+                            # re-load flipped bytes into a pixmap to rotate
+                            current_pix = fitz.Pixmap(raw_dict["image"])
+                    if visual_rotation:
+                        raw_dict["image"] = self._rotate_image(current_pix, -visual_rotation)
 
             images.append(raw_dict)
 
