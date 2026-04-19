@@ -141,8 +141,18 @@ class RawPageFitz(RawPage):
 
     @debug_plot('Source Paths')
     def _init_paths(self, **settings):
-        '''Initialize Paths based on drawings extracted with PyMuPDF.'''
+        '''Initialize Paths based on drawings extracted with PyMuPDF.
+
+        PyMuPDF >= 1.18 returns ``page.get_cdrawings()`` coordinates in the
+        un-rotated page CS (mediabox), so paths on rotated pages are
+        mis-aligned relative to text blocks (which pdf2docx rotates through
+        ``Element.ROTATION_MATRIX``). To keep every geometry consistent we
+        pre-transform the raw drawings into the real (rotated) page CS here
+        so Path / Shape classes keep their "already rotated" contract.
+        '''
         raw_paths = self.page_engine.get_cdrawings()
+        if self.page_engine.rotation:
+            raw_paths = _rotate_raw_drawings(raw_paths, self.page_engine.rotation_matrix)
         return Paths(parent=self).restore(raw_paths)
     
 
@@ -152,13 +162,70 @@ class RawPageFitz(RawPage):
         Returns:
             list: A list of source hyperlink dict.
         """
+        rotation_matrix = self.page_engine.rotation_matrix if self.page_engine.rotation else None
         hyperlinks = []
         for link in self.page_engine.get_links():
             if link['kind']!=2: continue # consider internet address only
+            # ``link['from']`` is un-rotated; rotate so hyperlinks align with
+            # rotated text blocks below.
+            rect = fitz.Rect(link['from'])
+            if rotation_matrix is not None:
+                rect = rect * rotation_matrix
             hyperlinks.append({
                 'type': RectType.HYPERLINK.value,
-                'bbox': tuple(link['from']),
+                'bbox': tuple(rect),
                 'uri' : link['uri']
             })
 
         return hyperlinks
+
+
+def _rotate_raw_drawings(raw_paths, rotation_matrix):
+    """Transform every coordinate in a raw drawings list to the rotated page CS.
+
+    ``page.get_cdrawings()`` (PyMuPDF >= 1.18) returns coordinates in the
+    un-rotated mediabox. Downstream ``Shape`` / ``Stroke`` / ``Hyperlink``
+    classes assume real-page CS, so we apply ``rotation_matrix`` once here.
+    """
+    if not raw_paths:
+        return raw_paths
+
+    def _pt(p):
+        return tuple(fitz.Point(p) * rotation_matrix)
+
+    def _rect(r):
+        rect = fitz.Rect(r) * rotation_matrix
+        return (rect.x0, rect.y0, rect.x1, rect.y1)
+
+    def _quad(q):
+        # a quad is (ul, ur, ll, lr) of Points
+        return tuple(_pt(p) for p in q)
+
+    rotated = []
+    for raw in raw_paths:
+        new_raw = dict(raw)
+        if 'rect' in raw:
+            new_raw['rect'] = _rect(raw['rect'])
+        items = raw.get('items') or []
+        new_items = []
+        for item in items:
+            op = item[0]
+            if op == 'l':
+                # (op, p1, p2)
+                new_items.append((op, _pt(item[1]), _pt(item[2])))
+            elif op == 'c':
+                # (op, p1, p2, p3, p4)
+                new_items.append((op, _pt(item[1]), _pt(item[2]), _pt(item[3]), _pt(item[4])))
+            elif op == 're':
+                # (op, rect, orientation)
+                if len(item) >= 3:
+                    new_items.append((op, _rect(item[1]), item[2]))
+                else:
+                    new_items.append((op, _rect(item[1])))
+            elif op == 'qu':
+                new_items.append((op, _quad(item[1])))
+            else:
+                new_items.append(item)
+        new_raw['items'] = new_items
+        rotated.append(new_raw)
+    return rotated

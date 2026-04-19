@@ -215,12 +215,20 @@ class ImagesExtractor:
                     # recover image, e.g., handle image with mask, or CMYK color space
                     pix = self._recover_pixmap(doc, item)
 
-                    # rotate image: apply inverse of per-image transform, then page rotation
-                    # (PyMuPDF matrix maps image->page; correct pixmap with inverse: apply -angle)
+                    # Rotate raw pixmap to match its final visual orientation.
+                    # - ``image_rotation`` from the per-image PDF matrix is in
+                    #   CW degrees (the matrix maps image-space to un-rotated
+                    #   page-space).
+                    # - ``rotation`` (page.rotation) is the CW angle applied at
+                    #   display time.
+                    # Total visual CW rotation of the raw pixmap relative to
+                    # its stored orientation is image_rotation + page_rotation.
+                    # OpenCV ``getRotationMatrix2D`` uses CCW-positive degrees,
+                    # so negate to get a CW rotation.
                     raw_dict = self._to_raw_dict(pix, bbox)
-                    total_rotation = (rotation or 0) - image_rotation
-                    if total_rotation:
-                        raw_dict["image"] = self._rotate_image(pix, total_rotation)
+                    visual_rotation = (image_rotation + (rotation or 0)) % 360
+                    if visual_rotation:
+                        raw_dict["image"] = self._rotate_image(pix, -visual_rotation)
 
             images.append(raw_dict)
 
