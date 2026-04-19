@@ -34,18 +34,245 @@ class RawPageFitz(RawPage):
 
         image_blocks = self._preprocess_images(**settings)
         raw_dict['blocks'].extend(image_blocks)
-        
+
         shapes, images =  self._preprocess_shapes(**settings)
         raw_dict['shapes'] = shapes
         raw_dict['blocks'].extend(images)
 
         hyperlinks = self._preprocess_hyperlinks()
-        raw_dict['shapes'].extend(hyperlinks)        
-       
+        raw_dict['shapes'].extend(hyperlinks)
+
+        # Synthesize fill-in-blank underscore runs from orphan horizontal
+        # strokes (common in form documents: "Name: ______"). These are
+        # thin, wide horizontal rectangles with no adjacent text; Word has
+        # no generic "draw a line in the body" primitive, so we materialise
+        # them as underscore glyphs in the text stream.
+        fillin_blocks = self._synthesize_fillin_lines(text_blocks)
+        if fillin_blocks:
+            raw_dict['blocks'].extend(fillin_blocks)
+
         # Element is a base class processing coordinates, so set rotation matrix globally
         Element.set_rotation_matrix(self.page_engine.rotation_matrix)
 
         return raw_dict
+
+
+    def _synthesize_fillin_lines(self, text_blocks):
+        """Return synthetic text blocks that visually reproduce orphan
+        horizontal vector strokes used as fill-in-blank lines.
+
+        The check is intentionally very strict. Upstream already handles
+        strokes that form table grids (via lattice-table detection) and
+        strokes that underline real text (via the span semantic-type
+        pass). Any false positive here will be injected straight into the
+        raw text stream and subsequently break layout/table parsing, so
+        we only fire on strokes that look unambiguously like form
+        fill-in lines:
+
+        * long and thin in the display CS (>= 100pt wide, <= 1.5pt tall,
+          aspect >= 60);
+        * no other stroke — horizontal or vertical — within 25pt in any
+          direction of the stroke's bbox (rules out table borders and
+          adjacent cell edges);
+        * no text character runs within 4pt above the stroke along its
+          horizontal extent (rules out underlines of real text);
+        * the empty horizontal span to the left of the stroke must end
+          in a label-like text (ending with ':' or '*'), which is the
+          strong cue that this really is a blank-to-be-filled field.
+
+        All analysis happens in DISPLAY CS so rotated landscape pages
+        behave the same as portrait ones. Emission bboxes are converted
+        back to the un-rotated raw CS because upstream's
+        ``Element.__init__`` multiplies every raw bbox by
+        ``ROTATION_MATRIX`` before layout.
+        """
+        try:
+            drawings = self.page_engine.get_cdrawings()
+        except Exception:
+            return []
+        if not drawings:
+            return []
+
+        page_rotation = self.page_engine.rotation
+        rotation_matrix = self.page_engine.rotation_matrix if page_rotation else None
+        # inverse of the page rotation, used to convert display CS bboxes
+        # back to the un-rotated mediabox CS where raw text lives.
+        inverse_rotation = ~rotation_matrix if rotation_matrix is not None else None
+
+        # --- 1. collect every fill rectangle in display CS --------------
+        # We need both horizontal and vertical strokes AND general fills
+        # (checkboxes, shadings) so isolation checks catch every nearby
+        # mark — not just thin strokes.
+        all_fills_display = []   # list of fitz.Rect in display CS
+        horizontals_display = []  # list of thin-horizontal fitz.Rect in display CS
+        for d in drawings:
+            rect = d.get('rect')
+            if not rect or 'f' not in (d.get('type') or ''):
+                continue
+            try:
+                rx0, ry0, rx1, ry1 = rect
+            except Exception:
+                continue
+            raw_rect = fitz.Rect(rx0, ry0, rx1, ry1)
+            disp = raw_rect * rotation_matrix if rotation_matrix is not None else fitz.Rect(raw_rect)
+            all_fills_display.append(disp)
+            dw = disp.width
+            dh = disp.height
+            if dh <= 1.5 and dw >= 100.0 and dw >= dh * 60:
+                horizontals_display.append(disp)
+
+        if not horizontals_display:
+            return []
+
+        # --- 2. display-CS text lines with span text ---------------------
+        # We need both the bbox and whether the line ends with a label
+        # punctuation character so we can confirm the stroke is a form
+        # field. Upstream hands us blocks in un-rotated CS; pre-rotate
+        # them for comparison.
+        text_lines_display = []
+        for block in text_blocks:
+            if block.get('type') != 0:
+                continue
+            for line in block.get('lines', []):
+                lb = line.get('bbox')
+                if lb is None:
+                    continue
+                rect = fitz.Rect(*lb)
+                if rotation_matrix is not None:
+                    rect = rect * rotation_matrix
+                line_text = ''
+                for span in line.get('spans', []):
+                    for ch in span.get('chars', []):
+                        c = ch.get('c')
+                        if c:
+                            line_text += c
+                    if 'text' in span and not line_text:
+                        line_text += span['text']
+                text_lines_display.append((rect, line_text.rstrip()))
+
+        # --- 3. filter horizontals to real fill-in lines ----------------
+        synth = []
+        ISOLATION = 25.0   # no other stroke within this many pt in display CS
+        UNDERLAY_TOL = 4.0  # vertical distance between stroke and text baseline
+
+        for disp in horizontals_display:
+            # isolation: any other fill (except self) within 25pt?
+            expanded = fitz.Rect(
+                disp.x0 - ISOLATION,
+                disp.y0 - ISOLATION,
+                disp.x1 + ISOLATION,
+                disp.y1 + ISOLATION,
+            )
+            has_neighbour = False
+            for other in all_fills_display:
+                if other == disp:
+                    continue
+                # allow duplicates at identical rect (some PDFs draw the
+                # same stroke twice); strict equality is safe since we
+                # use fitz.Rect equality.
+                if abs(other.x0 - disp.x0) < 0.1 and abs(other.y0 - disp.y0) < 0.1 \
+                        and abs(other.x1 - disp.x1) < 0.1 and abs(other.y1 - disp.y1) < 0.1:
+                    continue
+                if expanded.intersects(other):
+                    has_neighbour = True
+                    break
+            if has_neighbour:
+                continue
+
+            # underlay: does the stroke sit under real text?
+            has_underlay_text = False
+            label_text = ''
+            for lb, txt in text_lines_display:
+                # text above stroke whose baseline is within a few pt
+                if abs(lb.y1 - disp.y0) <= UNDERLAY_TOL:
+                    inter = max(0.0, min(lb.x1, disp.x1) - max(lb.x0, disp.x0))
+                    span_len = min(disp.width, lb.width)
+                    if inter > 0 and span_len > 0 and inter >= 0.5 * span_len:
+                        has_underlay_text = True
+                        break
+                # label text to the left of stroke, on approximately the
+                # same baseline
+                if lb.x1 <= disp.x0 + 1.0 and abs(((lb.y0 + lb.y1) * 0.5) - disp.y0) <= 8.0:
+                    if txt and (txt[-1] in ':*;)' or txt.endswith('—') or txt.endswith('–')):
+                        label_text = txt
+            if has_underlay_text:
+                continue
+            if not label_text:
+                # no obvious "label:" in front — bail. This prevents us
+                # from injecting underscores into table rows and other
+                # decorative lines that happen to be isolated.
+                continue
+
+            # --- 4. emit synthetic underscore text ---------------------
+            # Emit in raw CS so Element.ROTATION_MATRIX puts it back in
+            # display CS when upstream builds Layout.
+            char_w = 5.5
+            font_size = 11.0
+            count = max(1, int(round(disp.width / char_w)))
+            text = '_' * count
+
+            # Compute a display-CS bbox sized to the stroke then map it
+            # back to raw CS via the inverse page rotation.
+            disp_bbox = fitz.Rect(
+                disp.x0,
+                disp.y0 - font_size + 1,
+                disp.x0 + count * char_w,
+                disp.y1 + 1,
+            )
+            raw_bbox = (disp_bbox * inverse_rotation) if inverse_rotation is not None else disp_bbox
+            rx0, ry0, rx1, ry1 = raw_bbox.x0, raw_bbox.y0, raw_bbox.x1, raw_bbox.y1
+
+            # direction is always "visually horizontal left-to-right"
+            # after page rotation; pre-rotate (1, 0) to get the raw
+            # direction so Line.pure_rotation_matrix() restores it.
+            if rotation_matrix is not None:
+                raw_dir = fitz.Point(1, 0) * ~fitz.Matrix(
+                    rotation_matrix.a, rotation_matrix.b,
+                    rotation_matrix.c, rotation_matrix.d, 0, 0)
+                direction = (raw_dir.x, raw_dir.y)
+            else:
+                direction = (1.0, 0.0)
+
+            # individual char bboxes positioned along the stroke axis in
+            # display CS, then mapped back. We keep char origins
+            # approximate — downstream only uses them for bbox math.
+            chars = []
+            for i in range(count):
+                cdisp = fitz.Rect(
+                    disp.x0 + i * char_w,
+                    disp.y0 - font_size + 1,
+                    disp.x0 + (i + 1) * char_w,
+                    disp.y1 + 1,
+                )
+                crraw = (cdisp * inverse_rotation) if inverse_rotation is not None else cdisp
+                chars.append({
+                    'c': '_',
+                    'origin': (crraw.x0, crraw.y1),
+                    'bbox': (crraw.x0, crraw.y0, crraw.x1, crraw.y1),
+                })
+
+            synth.append({
+                'type': 0,
+                'bbox': (rx0, ry0, rx1, ry1),
+                'lines': [{
+                    'bbox': (rx0, ry0, rx1, ry1),
+                    'wmode': 0,
+                    'dir': direction,
+                    'spans': [{
+                        'bbox': (rx0, ry0, rx1, ry1),
+                        'size': font_size,
+                        'flags': 0,
+                        'font': 'Times-Roman',
+                        'color': 0,
+                        'ascender': 0.9,
+                        'descender': -0.2,
+                        'text': text,
+                        'chars': chars,
+                    }],
+                }],
+            })
+
+        return synth
     
 
     def _preprocess_text(self, **settings):
