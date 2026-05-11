@@ -488,56 +488,64 @@ def _looks_like_continuation(row_a: Any, row_b: Any) -> bool:
 
 
 def _coalesce_row(dst_row: Any, src_row: Any) -> None:
-    """Append the non-empty cell text of src_row onto the matching cells of
-    dst_row by mutating the underlying blocks.
+    """Append the non-empty cell content of src_row into matching cells of
+    dst_row by transferring whole text blocks.
+
+    Earlier implementations tried to mutate the last span's ``.text``
+    attribute, which is silently a no-op when the span has ``chars``:
+    ``TextSpan.text`` is a property whose getter returns
+    ``''.join(c.c for c in self.chars)`` whenever ``self.chars`` is
+    populated, ignoring the ``_text`` field that the setter writes.
+    Every cell parsed from a real PDF has ``chars``, so mutating the
+    final span's text dropped 100% of the appended content while
+    silently reporting success.  See:
+    ``pdf2docx_plus._vendored.pdf2docx.text.TextSpan.text``.
+
+    Instead, we transfer the source cell's text blocks wholesale into
+    the destination cell's block list.  This preserves the original
+    line / span / char structure (including font, size, bbox metadata
+    that downstream ``make_docx`` relies on) and avoids any property-
+    setter surprises.
     """
     dst_cells = list(dst_row)
     src_cells = list(src_row)
     for i, src_cell in enumerate(src_cells):
         if src_cell is None or i >= len(dst_cells):
             continue
-        src_text = _cell_text(src_cell)
-        if not src_text:
+        if not _cell_text(src_cell):
             continue
         dst_cell = dst_cells[i]
         if dst_cell is None:
             continue
-        _append_text_to_cell(dst_cell, src_text)
+        _transfer_cell_blocks(dst_cell, src_cell)
 
 
-def _append_text_to_cell(cell: Any, text: str) -> None:
-    """Append a string to the last text block in ``cell`` (best effort).
+def _transfer_cell_blocks(dst_cell: Any, src_cell: Any) -> None:
+    """Move every text block from ``src_cell`` to the end of ``dst_cell``.
 
-    Falls back to a no-op when the cell has no writable text block; the
-    failure is silent because the layout copy is still better than
-    losing the continuation row entirely (the row remains in the
-    table).
+    Uses the ``Blocks._instances`` list directly so the blocks keep
+    their full identity (chars, spans, bbox, font metadata) instead of
+    being collapsed to a string.
     """
-    blocks = getattr(cell, "blocks", None)
-    if blocks is None:
+    src_blocks = getattr(src_cell, "blocks", None)
+    dst_blocks = getattr(dst_cell, "blocks", None)
+    if src_blocks is None or dst_blocks is None:
         return
-    for block in reversed(list(blocks)):
-        lines = getattr(block, "lines", None)
-        if not lines:
-            continue
-        last_line = list(lines)[-1] if lines else None
-        if last_line is None:
-            continue
-        spans = getattr(last_line, "spans", None)
-        if not spans:
-            continue
-        last_span = list(spans)[-1] if spans else None
-        if last_span is None:
-            continue
+    src_instances = getattr(src_blocks, "_instances", None)
+    dst_instances = getattr(dst_blocks, "_instances", None)
+    # Some Cell implementations expose a ``Blocks`` wrapper without
+    # ``_instances``; fall back to iterating the wrapper directly.
+    if src_instances is None:
         try:
-            last_span.text = (getattr(last_span, "text", "") or "") + " " + text
+            src_instances = list(src_blocks)
+        except TypeError:
             return
-        except AttributeError:
-            try:
-                last_span._text = (getattr(last_span, "_text", "") or "") + " " + text
-                return
-            except AttributeError:
-                continue
+    if dst_instances is None:
+        # No append-target available — bail rather than silently losing
+        # the source content.
+        return
+    for block in list(src_instances):
+        dst_instances.append(block)
 
 
 def _remove_block(page: Any, target: Any) -> None:
