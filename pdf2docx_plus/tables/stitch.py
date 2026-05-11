@@ -1,24 +1,45 @@
-"""Cross-page table stitching.
+"""Cross-page table stitching + intra-table row continuation merging.
 
-A table that continues on the next page is emitted by upstream as two
-independent tables — one ending at the page break, one starting after it.
-That loses the logical relationship, doubles headers, and breaks TEDS
-scoring.
+Upstream emits a continuation table as two independent
+``TableBlock`` instances - one ending at the page break, one starting
+after it.  That doubles headers, breaks TEDS scoring, and (in
+documents where every page carries the same header image) fragments a
+single Q&A list into one table per page.  Downstream tools then have
+to glue the pieces back together; this module does it once, here.
 
-Stitch heuristic (plan §B.7):
+What we merge:
 
-1. For every pair of consecutive pages, take the *last* table on page N
-   and the *first* table on page N+1.
-2. Merge if ALL of:
-   * same column count,
-   * x-range of column boundaries overlaps by > 90%,
-   * page-N-last-table ends within 30pt of the page-N bottom margin,
-   * page-N+1-first-table starts within 30pt of the page-N+1 top margin,
-   * optionally: the top row of page-N+1 table repeats the top row of
-     page-N table (treated as duplicated header — drop on merge).
+1.  **Cross-page table stitching** (plan §B.7) - the *last* table on
+    page N and the *first* table on page N+1 are merged when:
 
-When merged, the second table's rows (minus the repeated header, if any)
-are appended to the first table, and the second table is removed.
+    * column count matches exactly,
+    * the x-range of column boundaries overlaps by > 90%,
+    * EITHER the last table ends within 30pt of the page-N bottom
+      margin AND the next table starts within 30pt of the page-N+1 top
+      margin, OR there's no non-image, non-header/footer body content
+      between the table and the page edge (handles documents whose
+      every page has a header/footer image - the page-image strip
+      pushed the table away from the literal page edge but logically
+      the table still occupies the full content area).
+    * the second table's first row is dropped if it textually
+      duplicates the first table's first row (repeated header).
+
+2.  **Intra-table row continuation** (paragraph 12 in the user's pain
+    list).  When a single table row's content wraps onto the next
+    page, upstream emits two rows:
+
+      Row A (page N, last row): the canonical row, all cells full.
+      Row B (page N+1, first row of next table): one cell carries the
+        wrapped tail; every other cell is empty.
+
+    After stitching, the two rows sit next to each other in the same
+    table; we coalesce them by appending Row B's non-empty cell text
+    into the corresponding cell of Row A and dropping Row B.
+
+The continuation merge runs only on table fragments we just stitched.
+We do NOT touch tables that were already a single ``TableBlock`` -
+those are upstream's natural rows and any "mostly-empty row" inside
+them is signal, not noise.
 """
 
 from __future__ import annotations
@@ -31,6 +52,7 @@ from typing import Any
 class StitchReport:
     merged_pairs: list[tuple[int, int]] = field(default_factory=list)
     skipped_pairs: list[tuple[int, int, str]] = field(default_factory=list)
+    continuation_rows_merged: int = 0
 
 
 def stitch_cross_page_tables(
@@ -39,9 +61,32 @@ def stitch_cross_page_tables(
     bottom_margin_tolerance: float = 30.0,
     top_margin_tolerance: float = 30.0,
     x_overlap_threshold: float = 0.9,
+    image_aware: bool = True,
+    header_footer_texts: set[str] | None = None,
 ) -> StitchReport:
-    """Merge continuation tables in place across a list of parsed pages."""
+    """Merge continuation tables in place across a list of parsed pages.
+
+    Args:
+        pages: parsed pages in document order; only finalized pages are
+            considered.
+        bottom_margin_tolerance: literal-pt distance from page bottom
+            below which the last table is considered "page-edge".
+        top_margin_tolerance: literal-pt distance from page top within
+            which the first table is considered "page-edge".
+        x_overlap_threshold: per-column x-overlap ratio averaged across
+            columns; we only stitch when this exceeds the threshold.
+        image_aware: when True (default), treat ``ImageBlock`` content
+            between the table and the page edge as transparent (a
+            page-header image doesn't disqualify the table from being
+            considered page-edge content).
+        header_footer_texts: optional set of normalised text strings
+            (lowercased) that we've already identified as repeating
+            header/footer content. When supplied, any text block whose
+            text matches one of these is treated as transparent during
+            the page-edge proximity check.
+    """
     report = StitchReport()
+    hf_set = header_footer_texts or set()
     for i in range(len(pages) - 1):
         a = pages[i]
         b = pages[i + 1]
@@ -61,13 +106,16 @@ def stitch_cross_page_tables(
             bottom_margin_tolerance=bottom_margin_tolerance,
             top_margin_tolerance=top_margin_tolerance,
             x_overlap_threshold=x_overlap_threshold,
+            image_aware=image_aware,
+            header_footer_texts=hf_set,
         )
         if reason is not None:
             report.skipped_pairs.append((a.id, b.id, reason))
             continue
 
-        _merge_tables(last_a, first_b, pages=(a, b))
+        rows_merged = _merge_tables(last_a, first_b, pages=(a, b))
         report.merged_pairs.append((a.id, b.id))
+        report.continuation_rows_merged += rows_merged
     return report
 
 
@@ -86,7 +134,100 @@ def _iter_column_blocks(page: Any) -> list[Any]:
 
 
 def _is_table(block: Any) -> bool:
-    return hasattr(block, "rows") and hasattr(block, "num_rows")
+    # ``TableBlock`` exposes ``num_rows`` and the iterator protocol but
+    # NOT a ``rows`` attribute (rows are stored under ``_rows``); the
+    # most reliable duck-type is ``is_table_block`` from upstream's
+    # ``common.Block``.
+    if getattr(block, "is_table_block", False):
+        return True
+    return hasattr(block, "num_rows") and not hasattr(block, "lines")
+
+
+def _rows_of(table: Any) -> list[Any]:
+    """Return the table's rows as a concrete list.
+
+    ``TableBlock`` is iterable but doesn't expose a ``rows`` attribute.
+    Some places in this module previously called ``table.rows`` -
+    that's not portable. This helper centralises the access.
+    """
+    rows = getattr(table, "_rows", None)
+    if rows is not None:
+        return list(rows)
+    try:
+        return list(iter(table))
+    except TypeError:
+        return []
+
+
+import re as _re
+
+_PAGE_FOOTER_PATTERNS = (
+    "last update",
+    "last updated",
+    "page ",
+    " / ",
+)
+
+# Footnote-style leading: digit + space, then content. We accept up to
+# 3 digits so footnote numbering past 99 is still recognised.
+_FOOTNOTE_PREFIX = _re.compile(r"^\d{1,3}\s+\S")
+
+
+def _is_image_only_block(block: Any) -> bool:
+    """A block that we should treat as transparent when checking page-edge proximity.
+
+    Includes:
+
+    * raw ``ImageBlock`` instances,
+    * ``TextBlock`` whose every line contains only ``ImageSpan``
+      (upstream wraps inline images in a TextBlock),
+    * very short text blocks that match the page-header / page-footer
+      patterns we know upstream emits inline; those will be removed
+      later by ``extract_headers_footers`` or
+      ``promote_page_numbers_to_footer`` but stitching needs to
+      tolerate them right now.
+    """
+    if getattr(block, "is_table_block", False):
+        return False
+    if not hasattr(block, "lines") and hasattr(block, "image"):
+        return True
+    lines = getattr(block, "lines", None)
+    if not lines:
+        return False
+    # all-image lines
+    all_image = True
+    for line in lines:
+        for span in getattr(line, "spans", []) or []:
+            if not hasattr(span, "image"):
+                all_image = False
+                break
+        if not all_image:
+            break
+    if all_image:
+        return True
+    # short text that looks like header/footer chrome
+    text = _block_plain_text(block).strip()
+    if not text or len(text) > 80:
+        return False
+    low = text.lower()
+    for pat in _PAGE_FOOTER_PATTERNS:
+        if pat in low:
+            return True
+    # bare page numbers ("12", "12/42")
+    if text.replace("/", "").replace(" ", "").isdigit():
+        return True
+    return False
+
+
+def _block_plain_text(block: Any) -> str:
+    lines = getattr(block, "lines", None)
+    if not lines:
+        return ""
+    parts: list[str] = []
+    for line in lines:
+        for span in getattr(line, "spans", []) or []:
+            parts.append(getattr(span, "text", "") or "")
+    return "".join(parts)
 
 
 def _last_table(page: Any) -> Any | None:
@@ -100,12 +241,15 @@ def _first_table(page: Any) -> Any | None:
 
 
 def _col_bounds(table: Any) -> list[tuple[float, float]]:
-    try:
-        first_row = next(iter(table.rows))
-    except StopIteration:
+    """Column x-bounds taken from the canonical (first non-empty) row."""
+    rows = _rows_of(table)
+    if not rows:
         return []
+    first_row = rows[0]
     bounds: list[tuple[float, float]] = []
     for cell in first_row:
+        if cell is None:
+            continue
         bbox = getattr(cell, "bbox", None)
         if bbox is None:
             continue
@@ -135,6 +279,8 @@ def _can_stitch(
     bottom_margin_tolerance: float,
     top_margin_tolerance: float,
     x_overlap_threshold: float,
+    image_aware: bool,
+    header_footer_texts: set[str] | None = None,
 ) -> str | None:
     cols_a = _col_bounds(last_a)
     cols_b = _col_bounds(first_b)
@@ -152,55 +298,246 @@ def _can_stitch(
     last_bottom = float(getattr(last_a, "bbox", (0, 0, 0, 0))[3])
     first_top = float(getattr(first_b, "bbox", (0, 0, 0, 0))[1])
 
-    if page_a_bbox[3] - last_bottom > bottom_margin_tolerance:
-        return f"last-table-to-page-bottom > {bottom_margin_tolerance}"
-    if first_top - page_b_bbox[1] > top_margin_tolerance:
-        return f"first-table-from-page-top > {top_margin_tolerance}"
+    bottom_dist = page_a_bbox[3] - last_bottom
+    top_dist = first_top - page_b_bbox[1]
+    edges_ok = (
+        bottom_dist <= bottom_margin_tolerance
+        and top_dist <= top_margin_tolerance
+    )
+    if not edges_ok and image_aware:
+        # be lenient when the only thing between the table and the page edge
+        # is an image OR a known header/footer block (typical for
+        # documents that stamp a logo on every page).
+        if _between_is_only_chrome(
+            page_a, last_a, edge="bottom", hf_texts=header_footer_texts or set()
+        ) and _between_is_only_chrome(
+            page_b, first_b, edge="top", hf_texts=header_footer_texts or set()
+        ):
+            edges_ok = True
+    if not edges_ok:
+        return (
+            f"page-edge distance not satisfied "
+            f"(bottom={bottom_dist:.1f} top={top_dist:.1f})"
+        )
     return None
 
 
-def _merge_tables(last_a: Any, first_b: Any, *, pages: tuple[Any, Any]) -> None:
-    """Append first_b rows into last_a, then unlink first_b from page_b."""
-    src_rows = list(getattr(first_b, "rows", []) or [])
-    dst_rows = getattr(last_a, "rows", None)
-    if dst_rows is None or not src_rows:
-        return
+def _between_is_only_chrome(
+    page: Any, table: Any, *, edge: str, hf_texts: set[str],
+    body_char_budget: int = 300,
+) -> bool:
+    """Return True when the blocks between ``table`` and the page edge are
+    only "chrome": images, page-header / page-footer pattern text,
+    detected repeating header/footer blocks, or a small amount of
+    ancillary body text (e.g. footnotes).
+
+    Rationale: when a logical table is rendered across N pages and each
+    page also carries a footnote of its own at the bottom, the table
+    fragments should still be stitched - footnote content occupying
+    < ``body_char_budget`` characters per page-edge gap is treated as
+    ancillary to the table flow. A larger gap (intro paragraph,
+    section heading) DOES disqualify the stitch because the next
+    table is then a different logical block.
+
+    For ``edge='bottom'`` we look at blocks below ``table``; for
+    ``edge='top'`` we look at blocks above ``table``.
+    """
+    table_bbox = getattr(table, "bbox", None)
+    if table_bbox is None:
+        return False
+    table_top = float(table_bbox[1])
+    table_bottom = float(table_bbox[3])
+    body_text_chars = 0
+    for block in _iter_column_blocks(page):
+        if block is table:
+            continue
+        bb = getattr(block, "bbox", None)
+        if bb is None:
+            continue
+        try:
+            b_top = float(bb[1])
+            b_bottom = float(bb[3])
+        except (TypeError, IndexError):
+            continue
+        if edge == "bottom" and b_top < table_bottom:
+            continue
+        if edge == "top" and b_bottom > table_top:
+            continue
+        if _is_image_only_block(block):
+            continue
+        text_norm = _block_plain_text(block).strip().lower()
+        if not text_norm:
+            continue
+        # known repeating header/footer text - treat as chrome
+        if text_norm in hf_texts:
+            continue
+        # footnote-style block (digit prefix + content) is treated as
+        # transparent regardless of length. Footnotes are page-level
+        # decoration; the underlying table flow continues.
+        if _FOOTNOTE_PREFIX.match(text_norm):
+            continue
+        # accumulate ancillary body text. Long content (a real
+        # section header / intro paragraph) disqualifies the stitch.
+        body_text_chars += len(text_norm)
+        if body_text_chars > body_char_budget:
+            return False
+    return True
+
+
+def _merge_tables(last_a: Any, first_b: Any, *, pages: tuple[Any, Any]) -> int:
+    """Append first_b rows into last_a, then unlink first_b from page_b.
+
+    Returns the number of intra-table continuation rows we coalesced
+    while merging (the rows where second-table-row carries wrap-over
+    content for a partially-empty first-table-row).
+    """
+    src_rows = _rows_of(first_b)
+    dst_rows_collection = getattr(last_a, "_rows", None)
+    if dst_rows_collection is None or not src_rows:
+        return 0
+    dst_rows = _rows_of(last_a)
 
     # If the first row of first_b equals the first row of last_a (header
     # repeat), skip it. Equality is per-cell text match.
     if _first_row_text(first_b) == _first_row_text(last_a):
         src_rows = src_rows[1:]
 
-    # dst_rows behaves like a Collection with append
+    continuation_merged = 0
+
+    # Try continuation-row merge: if the LAST destination row's text
+    # signature and the FIRST source row's text signature look like a
+    # split (most cells empty in one, full in the other, and the
+    # non-empty cell column overlaps), coalesce.
+    if src_rows and dst_rows:
+        last_dst = dst_rows[-1]
+        if _looks_like_continuation(last_dst, src_rows[0]):
+            _coalesce_row(last_dst, src_rows[0])
+            src_rows = src_rows[1:]
+            continuation_merged += 1
+
+    # dst_rows_collection behaves like a Rows Collection with append
     for row in src_rows:
-        dst_rows.append(row)  # type: ignore[attr-defined]
+        dst_rows_collection.append(row)
 
     # remove first_b from the second page's blocks
     _, page_b = pages
     _remove_block(page_b, first_b)
+    return continuation_merged
 
 
 def _first_row_text(table: Any) -> tuple[str, ...]:
-    try:
-        first_row = next(iter(table.rows))
-    except StopIteration:
+    rows = _rows_of(table)
+    if not rows:
         return ()
+    first_row = rows[0]
     out: list[str] = []
     for cell in first_row:
-        blocks = getattr(cell, "blocks", None)
-        if blocks is None:
+        if cell is None:
             out.append("")
             continue
-        text = ""
-        for block in blocks:
-            lines = getattr(block, "lines", None)
-            if lines is None:
-                continue
-            for line in lines:
-                for span in getattr(line, "spans", []) or []:
-                    text += getattr(span, "text", "") or ""
-        out.append(text.strip())
+        out.append(_cell_text(cell))
     return tuple(out)
+
+
+def _cell_text(cell: Any) -> str:
+    blocks = getattr(cell, "blocks", None)
+    if blocks is None:
+        return ""
+    text = ""
+    for block in blocks:
+        lines = getattr(block, "lines", None)
+        if lines is None:
+            continue
+        for line in lines:
+            for span in getattr(line, "spans", []) or []:
+                text += getattr(span, "text", "") or ""
+    return text.strip()
+
+
+def _last_iter(rows: Any) -> Any | None:
+    try:
+        items = list(rows)
+    except Exception:
+        return None
+    return items[-1] if items else None
+
+
+def _looks_like_continuation(row_a: Any, row_b: Any) -> bool:
+    """Detect that row_b is the wrap-over of row_a.
+
+    Heuristic: row_b has exactly one or two non-empty cells AND every
+    non-empty cell in row_b corresponds to a non-empty cell in row_a
+    (we're appending wrap text, not introducing a new column).
+    """
+    cells_a = list(row_a)
+    cells_b = list(row_b)
+    if not cells_a or len(cells_a) != len(cells_b):
+        return False
+    a_full = [bool(_cell_text(c)) if c is not None else False for c in cells_a]
+    b_full = [bool(_cell_text(c)) if c is not None else False for c in cells_b]
+    if all(b_full):
+        return False  # row_b is a normal data row
+    non_empty_b = sum(1 for f in b_full if f)
+    if non_empty_b == 0 or non_empty_b > 2:
+        return False
+    # the non-empty cells of row_b must be a subset of row_a's
+    for i, full in enumerate(b_full):
+        if full and not a_full[i]:
+            return False
+    return True
+
+
+def _coalesce_row(dst_row: Any, src_row: Any) -> None:
+    """Append the non-empty cell text of src_row onto the matching cells of
+    dst_row by mutating the underlying blocks.
+    """
+    dst_cells = list(dst_row)
+    src_cells = list(src_row)
+    for i, src_cell in enumerate(src_cells):
+        if src_cell is None or i >= len(dst_cells):
+            continue
+        src_text = _cell_text(src_cell)
+        if not src_text:
+            continue
+        dst_cell = dst_cells[i]
+        if dst_cell is None:
+            continue
+        _append_text_to_cell(dst_cell, src_text)
+
+
+def _append_text_to_cell(cell: Any, text: str) -> None:
+    """Append a string to the last text block in ``cell`` (best effort).
+
+    Falls back to a no-op when the cell has no writable text block; the
+    failure is silent because the layout copy is still better than
+    losing the continuation row entirely (the row remains in the
+    table).
+    """
+    blocks = getattr(cell, "blocks", None)
+    if blocks is None:
+        return
+    for block in reversed(list(blocks)):
+        lines = getattr(block, "lines", None)
+        if not lines:
+            continue
+        last_line = list(lines)[-1] if lines else None
+        if last_line is None:
+            continue
+        spans = getattr(last_line, "spans", None)
+        if not spans:
+            continue
+        last_span = list(spans)[-1] if spans else None
+        if last_span is None:
+            continue
+        try:
+            last_span.text = (getattr(last_span, "text", "") or "") + " " + text
+            return
+        except AttributeError:
+            try:
+                last_span._text = (getattr(last_span, "_text", "") or "") + " " + text
+                return
+            except AttributeError:
+                continue
 
 
 def _remove_block(page: Any, target: Any) -> None:

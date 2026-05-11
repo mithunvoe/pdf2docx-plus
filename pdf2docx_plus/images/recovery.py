@@ -39,8 +39,8 @@ def recover_images(
     *,
     rasterize_vectors: bool = False,
     recover_missing_rasters: bool = True,
-    min_drawing_density: float = 0.002,
-    max_text_overlap: float = 0.2,
+    min_drawing_density: float = 0.05,
+    max_text_overlap: float = 0.20,
     render_dpi: int = 150,
 ) -> RecoveryReport:
     """Patch `docx_path` with recovered images from `pdf_path`.
@@ -220,34 +220,61 @@ def _text_block_rects(page: fitz.Page) -> list[fitz.Rect]:
 
 
 def _vector_clusters(page: fitz.Page, min_density: float) -> list[fitz.Rect]:
-    """Return bbox rects of clusters of vector drawings likely to be graphics."""
+    """Return bbox rects of clusters of vector drawings likely to be graphics.
+
+    A cluster qualifies only when:
+
+    * its bounding box is at least 100x100 pt (raised from 60x60 -
+      avoids rasterizing decorative dividers and small icon clusters),
+    * the per-drawing area density inside the cluster is at least
+      ``min_density``,
+    * the cluster contains a meaningful number of *fill* drawings
+      (>= 4) - this filters table-border-only structures whose
+      strokes happen to cluster geometrically; a real chart / icon
+      has filled regions.
+
+    Cluster bbox is computed from the geometric union of
+    individual drawing rects (with a small pad so adjacent shapes
+    merge), not from the page geometry.
+    """
     drawings = page.get_drawings()
     if not drawings:
         return []
-    rects: list[tuple[fitz.Rect, float]] = []  # (rect, area)
+    drawing_meta: list[tuple[fitz.Rect, float, bool]] = []  # rect, area, is_fill
     for d in drawings:
         r = d.get("rect")
         if r is None:
             continue
         rr = fitz.Rect(r)
-        # skip thin rule lines (table borders, underlines)
         if rr.width < 3 or rr.height < 3:
             continue
-        rects.append((rr, rr.width * rr.height))
-    if not rects:
+        d_type = d.get("type", "")
+        is_fill = d_type in ("f", "fs")  # fill or fill+stroke
+        drawing_meta.append((rr, rr.width * rr.height, is_fill))
+    if not drawing_meta:
         return []
 
-    merged = _merge_overlapping([r for r, _ in rects], pad=10.0)
+    merged = _merge_overlapping([r for r, _, _ in drawing_meta], pad=10.0)
 
     clusters: list[fitz.Rect] = []
     for m in merged:
-        # drawing area inside this merged bbox
-        total_draw_area = sum(a for r, a in rects if m.contains(r) or m.intersects(r))
+        # drawing area + fill count inside this merged bbox
+        total_draw_area = 0.0
+        fill_count = 0
+        for r, a, is_fill in drawing_meta:
+            if not (m.contains(r) or m.intersects(r)):
+                continue
+            total_draw_area += a
+            if is_fill:
+                fill_count += 1
         m_area = max(m.width * m.height, 1.0)
         density = total_draw_area / m_area
-        if m.width < 60 or m.height < 60:
+        if m.width < 100 or m.height < 100:
             continue
         if density < min_density:
+            continue
+        if fill_count < 4:
+            # too few filled regions for a chart / diagram
             continue
         clusters.append(m)
     return clusters
@@ -272,14 +299,53 @@ def _merge_overlapping(rects: list[fitz.Rect], *, pad: float = 0.0) -> list[fitz
 
 
 def _overlap_frac(region: fitz.Rect, blocks: list[fitz.Rect]) -> float:
-    """Max fraction of `region` area covered by any single text block."""
+    """Total fraction of ``region`` area covered by *any* text block.
+
+    Previously this returned the max overlap of a single text block,
+    which under-counted dense regions where many small text blocks
+    each cover < 20% individually but together cover most of the
+    region.  That under-counting is the root cause of "highlighted
+    table cells rasterized as a chart": every cell contains a small
+    text block that doesn't individually exceed 20% of the cluster
+    area, so the cluster was treated as a pure vector graphic.
+
+    The total-area calculation is conservative against double counting:
+    overlapping text-block bboxes contribute the union of their
+    intersections with ``region``, not the sum.
+    """
     region_area = max(region.width * region.height, 1.0)
-    best = 0.0
+    inters: list[fitz.Rect] = []
     for b in blocks:
         inter = region & b
         if inter.is_empty:
             continue
-        frac = (inter.width * inter.height) / region_area
-        if frac > best:
-            best = frac
-    return best
+        inters.append(inter)
+    if not inters:
+        return 0.0
+    # union area: approximate by summing pixel-level area; for tight
+    # bounds we'd run a sweep-line, but a tolerant approximation is
+    # enough to filter false positives here.
+    union_area = _union_area(inters)
+    return min(union_area / region_area, 1.0)
+
+
+def _union_area(rects: list[fitz.Rect]) -> float:
+    """Return an approximate union area of ``rects``.
+
+    Uses a simple inclusion-exclusion truncated at first-order
+    (sum of areas minus sum of pairwise intersections), which is exact
+    when intersections themselves don't overlap and is a slight
+    over-estimate otherwise.  Over-estimating the text coverage is the
+    safe direction here: it errs towards NOT rasterizing.
+    """
+    n = len(rects)
+    if n == 0:
+        return 0.0
+    total = sum(max(r.width, 0) * max(r.height, 0) for r in rects)
+    for i in range(n):
+        for j in range(i + 1, n):
+            inter = rects[i] & rects[j]
+            if inter.is_empty:
+                continue
+            total -= max(inter.width, 0) * max(inter.height, 0)
+    return max(total, 0.0)

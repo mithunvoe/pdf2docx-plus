@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 
@@ -44,6 +43,12 @@ def align_tblgrid_to_cells(document: Any) -> int:
     source PDF's layout but then emitted a uniform grid, and the
     renderer honours the grid.
 
+    Tables that contain floating images are skipped: ``add_float_image``
+    encodes the image's position relative to the column boundary, so
+    rewriting the grid would knock the picture off its source location.
+    Inline (``wp:inline``) images flow with text and are unaffected, so
+    we only skip when a ``<w:drawing>`` is wrapped in ``<wp:anchor>``.
+
     Returns the number of tables whose grid was rewritten. No-ops for
     tables where no canonical row can be found (e.g. every row has
     merged cells or missing ``<w:tcW>``).
@@ -51,9 +56,27 @@ def align_tblgrid_to_cells(document: Any) -> int:
     body = document.element.body
     rewritten = 0
     for tbl in body.iter(qn("w:tbl")):
+        if _table_has_floating_image(tbl):
+            continue
         if _rewrite_grid_from_cells(tbl):
             rewritten += 1
     return rewritten
+
+
+def _table_has_floating_image(tbl: Any) -> bool:
+    """Return True when the table embeds at least one ``<wp:anchor>`` drawing.
+
+    Inline images (``<wp:inline>``) flow with text and the column-fit
+    logic is safe for them; only anchored images break when the column
+    geometry changes underneath.
+    """
+    for drawing in tbl.iter(qn("w:drawing")):
+        # wp namespace uses non-w qualifier; iter over children
+        for child in drawing:
+            tag = child.tag
+            if isinstance(tag, str) and tag.endswith("}anchor"):
+                return True
+    return False
 
 
 def _rewrite_grid_from_cells(tbl: Any) -> bool:
@@ -155,12 +178,44 @@ def fit_oversized_tables(document: Any) -> int:
     for child in body:
         if child.tag == qn("w:tbl"):
             content_w = section_widths[sect_idx] if sect_idx < len(section_widths) else default_w
-            if _fit_one_table(child, content_w):
+            # Tables that contain floating images: only clamp the
+            # indent (so the table doesn't slide past the right
+            # margin); skip the column-scale step because scaling
+            # would shift columns relative to the absolutely-positioned
+            # ``<wp:anchor>``.
+            if _table_has_floating_image(child):
+                if _clamp_indent_only(child, content_w):
+                    adjusted += 1
+            elif _fit_one_table(child, content_w):
                 adjusted += 1
         elif child.tag == qn("w:p"):
             if child.find(qn("w:pPr") + "/" + qn("w:sectPr")) is not None:
                 sect_idx += 1
     return adjusted
+
+
+def _clamp_indent_only(tbl: Any, content_w: int) -> bool:
+    """Reduce ``<w:tblInd>`` so the table starts within the section's
+    content area; leave grid + cell widths alone."""
+    grid = tbl.find(qn("w:tblGrid"))
+    if grid is None:
+        return False
+    widths = [_int_or_none(gc.get(qn("w:w"))) or 0 for gc in grid.findall(qn("w:gridCol"))]
+    total = sum(widths)
+    if total <= 0:
+        return False
+    tblPr = tbl.find(qn("w:tblPr"))
+    tbl_ind_el = tblPr.find(qn("w:tblInd")) if tblPr is not None else None
+    if tbl_ind_el is None:
+        return False
+    ind = _read_int_attr(tbl_ind_el, qn("w:w"))
+    if ind + total <= content_w:
+        return False
+    target_ind = max(0, content_w - total)
+    if target_ind == ind:
+        return False
+    tbl_ind_el.set(qn("w:w"), str(target_ind))
+    return True
 
 
 def _fit_one_table(tbl: Any, content_w: int) -> bool:

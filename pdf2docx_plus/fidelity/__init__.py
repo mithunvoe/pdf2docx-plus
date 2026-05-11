@@ -17,7 +17,11 @@ Patches applied:
 from __future__ import annotations
 
 from . import crashguards as _crashguards  # noqa: F401
+from . import determinism as _determinism  # noqa: F401
 from . import hyperlink as _hyperlink  # noqa: F401
+from . import hyphens as _hyphens  # noqa: F401
+from . import images as _images  # noqa: F401
+from . import pathological_tables as _pathological_tables  # noqa: F401
 from . import styles as _styles  # noqa: F401
 from . import symbols as _symbols  # noqa: F401
 from . import text as _text  # noqa: F401

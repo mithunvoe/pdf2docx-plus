@@ -44,9 +44,9 @@ from .emit import (
     fix_page_margins,
     flatten_per_page_sections,
     insert_page_breaks,
-    promote_page_numbers_to_footer,
     merge_consecutive_single_row_tables,
     normalize_multi_column_sections,
+    promote_page_numbers_to_footer,
     repair_wrap_spacing,
     trim_empty_table_rows,
     unwrap_tiny_tables,
@@ -60,10 +60,20 @@ from .errors import (
     TimeoutExceeded,
 )
 from .images import recover_images
-from .layout import detect_header_footer, detect_scanned_pages, normalise_list_blocks
+from .layout import (
+    detect_header_footer,
+    detect_margin_labels,
+    detect_scanned_pages,
+    drop_margin_labels,
+    normalise_list_blocks,
+)
 from .logging import get_logger, silence_upstream
 from .plugins import PluginRegistry
-from .tables import demote_floating_images_in_cells, stitch_cross_page_tables
+from .tables import (
+    demote_floating_images_in_cells,
+    recover_pathological_tables,
+    stitch_cross_page_tables,
+)
 
 _log = get_logger("api")
 
@@ -88,8 +98,13 @@ class ConversionResult:
     warnings: list[str] = field(default_factory=list)
     scanned_pages: list[int] = field(default_factory=list)
     stitched_table_pairs: list[tuple[int, int]] = field(default_factory=list)
+    continuation_rows_merged: int = 0
     runs_merged: int = 0
     demoted_floating_images: int = 0
+    margin_labels_dropped: int = 0
+    margin_labels_detected: int = 0
+    pathological_tables_detected: int = 0
+    pathological_blocks_recovered: int = 0
     lists_detected: int = 0
     lists_emitted: int = 0
     headers_footers_detected: int = 0
@@ -201,7 +216,7 @@ class Converter:
         profile: str = "fidelity",
         extra_settings: dict[str, Any] | None = None,
         apply_list_formatting: bool = True,
-        extract_headers_footers_to_section: bool = False,
+        extract_headers_footers_to_section: bool = True,
         consolidate_adjacent_runs: bool = True,
         collapse_empty_paras: bool = True,
         normalize_multi_col_sections: bool = True,
@@ -216,6 +231,7 @@ class Converter:
         rasterize_vector_graphics: bool = False,
         skip_images: bool = False,
         skip_tables: bool = False,
+        drop_margin_labels_in_body: bool = True,
     ) -> ConversionResult:
         """Convert PDF to DOCX.
 
@@ -239,12 +255,14 @@ class Converter:
             apply_list_formatting: detect bullet / numbered lists and emit
                 real OOXML `w:numPr` lists. Default True.
             extract_headers_footers_to_section: move detected repeating
-                top/bottom blocks from the body into `section.header` /
-                `section.footer`. **Default False** — this remaps content
-                aggressively and only works cleanly on single-section
-                documents. Enable when you're converting a short, uniform
-                document (contract, KFS sheet) and want pagination chrome
-                moved out of the body.
+                top/bottom blocks from the body into ``section.header`` /
+                ``section.footer``. **Default True** — the extractor is
+                multi-section-aware: it processes each section's
+                buckets independently, links consecutive sections via
+                ``is_linked_to_previous`` when they share the same
+                content, and only writes one stored copy of the chrome.
+                Disable when you want pagination text to remain inline
+                in the body (rare; legacy compatibility).
             consolidate_adjacent_runs: merge adjacent `<w:r>` elements
                 with identical run-properties. Default True — safe,
                 improves editability.
@@ -327,8 +345,13 @@ class Converter:
                 images in the wrong spot on unusual layouts.
             rasterize_vector_graphics: **opt-in.** Detect clusters of
                 vector strokes that don't overlap text, rasterize at
-                `render_dpi`, embed inline. Default False — can
-                produce blurry output on text-dense pages.
+                ``render_dpi``, embed inline.  Default False because
+                highlighted-text tables (cells with coloured
+                backgrounds) can be misclassified as vector clusters
+                and rendered as a large blurry image at the wrong
+                position.  Enable for documents whose charts/graphs
+                are drawn as vector graphics and whose tables do not
+                use background highlighting.
 
         Returns:
             ConversionResult describing the outcome.
@@ -379,6 +402,7 @@ class Converter:
             "skip_images": skip_images,
             "recover_missing": recover_missing_images,
             "rasterize_vectors": rasterize_vector_graphics,
+            "drop_margin_labels": drop_margin_labels_in_body,
         }
 
         t0 = time.perf_counter()
@@ -547,15 +571,41 @@ class Converter:
         # Step 3.5: post-parse layout/table enrichments
         finalized_pages = [p for p in inner.pages if getattr(p, "finalized", False)]
         try:
+            # Recover content from pathological lattice tables FIRST so
+            # the recovered text blocks participate in downstream
+            # detection (header/footer, lists, stitching, etc.).
+            try:
+                recovery = recover_pathological_tables(finalized_pages, inner.fitz_doc)
+                result.pathological_tables_detected = len(recovery.pathological_tables)
+                result.pathological_blocks_recovered = recovery.blocks_recovered
+            except Exception as e:
+                _log.debug("pathological-table recovery skipped: %s", e)
             for page in finalized_pages:
                 result.demoted_floating_images += demote_floating_images_in_cells(page)
                 result.lists_detected += normalise_list_blocks(page)
-            stitch_report = stitch_cross_page_tables(finalized_pages)
-            result.stitched_table_pairs.extend(stitch_report.merged_pairs)
+            # margin label detection / drop (rotated text frames in
+            # the page margins - "Confidential", "DRAFT" stamps, etc.)
+            try:
+                detected = detect_margin_labels(finalized_pages)
+                result.margin_labels_detected = len(detected)
+                if getattr(self, "_pp_flags", {}).get("drop_margin_labels", True):
+                    result.margin_labels_dropped = drop_margin_labels(finalized_pages)
+            except Exception as e:
+                _log.debug("margin label pass skipped: %s", e)
+            # Run header/footer detection BEFORE table stitching so the
+            # repeating chrome text is treated as transparent during
+            # the page-edge proximity check.  Without this, a page-top
+            # banner that repeats verbatim on every page would block
+            # the stitch heuristic for every page-to-page transition.
             hf = detect_header_footer(finalized_pages)
             result.headers_footers_detected = len(hf)
-            # stash for post-emit extraction
             self._detected_hf = hf
+            hf_texts: set[str] = {h.text.strip().lower() for h in hf if h.text}
+            stitch_report = stitch_cross_page_tables(
+                finalized_pages, header_footer_texts=hf_texts
+            )
+            result.stitched_table_pairs.extend(stitch_report.merged_pairs)
+            result.continuation_rows_merged += stitch_report.continuation_rows_merged
         except Exception as e:
             _log.warning("post-parse enrichment failed: %s", e)
             result.warnings.append(f"post-parse enrichment failed: {e}")

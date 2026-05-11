@@ -123,3 +123,105 @@ def test_idempotent() -> None:
     second = collapse_empty_sections(doc)
     assert first == 2
     assert second == 0
+
+
+def _append_drawing_only_section(doc) -> None:
+    """Insert a section containing ONLY a single drawing element followed
+    by a section break. This mimics the per-page logo image that
+    upstream emits before the section's real body content is merged
+    elsewhere by stitching."""
+    body = doc.element.body
+    final_sect = body.find(qn("w:sectPr"))
+
+    # paragraph that hosts the drawing
+    p_draw = OxmlElement("w:p")
+    r = OxmlElement("w:r")
+    drawing = OxmlElement("w:drawing")
+    r.append(drawing)
+    p_draw.append(r)
+
+    # paragraph that carries the section break
+    p_sect = OxmlElement("w:p")
+    pPr = OxmlElement("w:pPr")
+    sectPr = OxmlElement("w:sectPr")
+    pPr.append(sectPr)
+    p_sect.append(pPr)
+
+    if final_sect is not None:
+        final_sect.addprevious(p_draw)
+        final_sect.addprevious(p_sect)
+    else:
+        body.append(p_draw)
+        body.append(p_sect)
+
+
+@pytest.mark.unit
+def test_collapses_drawing_only_section() -> None:
+    """A section whose only content is a single decorative drawing
+    (typically the per-page header logo) is collapsed."""
+    doc = Document()
+    _append_drawing_only_section(doc)
+    doc.add_paragraph("real content")
+    collapsed = collapse_empty_sections(doc)
+    assert collapsed == 1
+    assert any(p.text == "real content" for p in doc.paragraphs)
+
+
+@pytest.mark.unit
+def test_preserves_section_with_drawing_plus_text() -> None:
+    """A section containing both a drawing AND meaningful text is NOT
+    collapsed - the logo + text combination is real content."""
+    doc = Document()
+    body = doc.element.body
+    final_sect = body.find(qn("w:sectPr"))
+    # paragraph with drawing
+    p_draw = OxmlElement("w:p")
+    r = OxmlElement("w:r")
+    drawing = OxmlElement("w:drawing")
+    r.append(drawing)
+    p_draw.append(r)
+    # paragraph with text + sectPr
+    p_text = OxmlElement("w:p")
+    pPr = OxmlElement("w:pPr")
+    sectPr = OxmlElement("w:sectPr")
+    pPr.append(sectPr)
+    p_text.append(pPr)
+    r2 = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = "Section text"
+    r2.append(t)
+    p_text.append(r2)
+    if final_sect is not None:
+        final_sect.addprevious(p_draw)
+        final_sect.addprevious(p_text)
+    doc.add_paragraph("trailing")
+    collapsed = collapse_empty_sections(doc)
+    assert collapsed == 0
+
+
+@pytest.mark.unit
+def test_preserves_section_with_multiple_drawings() -> None:
+    """A section with two or more drawings is genuine visual content
+    (e.g. a slide-deck-style image gallery) and must be preserved."""
+    doc = Document()
+    body = doc.element.body
+    final_sect = body.find(qn("w:sectPr"))
+    # paragraph with two drawings inside two runs
+    p_draw = OxmlElement("w:p")
+    for _ in range(2):
+        r = OxmlElement("w:r")
+        drawing = OxmlElement("w:drawing")
+        r.append(drawing)
+        p_draw.append(r)
+    # section-break paragraph
+    p_sect = OxmlElement("w:p")
+    pPr = OxmlElement("w:pPr")
+    sectPr = OxmlElement("w:sectPr")
+    pPr.append(sectPr)
+    p_sect.append(pPr)
+    if final_sect is not None:
+        final_sect.addprevious(p_draw)
+        final_sect.addprevious(p_sect)
+    doc.add_paragraph("body")
+    collapsed = collapse_empty_sections(doc)
+    assert collapsed == 0

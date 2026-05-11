@@ -4,6 +4,111 @@
 
 ### Fixed
 
+- **Inline images forced into ``<wp:anchor>`` instead of ``<wp:inline>``.**
+  ``pdf2docx_plus._vendored.pdf2docx.common.docx.add_image`` (the
+  function that ``Image.make_docx`` calls for *every* inline image
+  span) was rewriting the python-docx default ``<wp:inline>`` into
+  ``<wp:anchor>`` with absolute page coordinates. The result was that
+  every logo or icon that should flow inline with surrounding text
+  instead became a floating overlay anchored to fixed (x, y), which:
+  (a) breaks downstream layout since Word cannot reflow anchored
+  images, (b) confuses the table detector when an inline image sits in
+  a cell, and (c) loses the connection between the image and its
+  caption paragraph. New fidelity patch
+  ``pdf2docx_plus.fidelity.images`` replaces ``add_image`` with an
+  inline implementation (``run.add_picture``) so every image emitted
+  by ``Image.make_docx`` / ``ImageSpan.make_docx`` produces
+  ``<wp:inline>``. Genuine float images still go through
+  ``add_float_image`` and emit ``<wp:anchor>`` exactly as before.
+- **Image alt-text (``/Alt``) dropped during extraction.** PDFs with
+  accessibility-grade alt-text annotations on raster images saw that
+  metadata silently lost - downstream consumers couldn't recover the
+  semantic description of a logo or chart. New extractor patch in
+  ``pdf2docx_plus.fidelity.images`` scans the page content stream for
+  ``/Alt(...)`` markers and stashes the result on the raw image dict;
+  ``Image.make_docx`` then propagates it onto ``<wp:docPr @descr>``.
+- **Table fragmentation on documents with per-page header images.**
+  The cross-page stitch heuristic in ``pdf2docx_plus.tables.stitch``
+  used to require the last table to end within 30pt of the page
+  bottom AND the first table on the next page to start within 30pt
+  of the page top. Documents that stamp a header image (and / or a
+  ``Last update`` footer) on every page never satisfied that
+  constraint, so a Q&A list that visually spans 42 pages was emitted
+  as 42 separate ``<w:tbl>`` blocks. The heuristic now considers an
+  expanded definition of "page-edge": (1) image-only blocks are
+  transparent, (2) text blocks matching footer / page-number patterns
+  are transparent, (3) footnote-style blocks
+  (``\d{1,3}\s+\S`` prefix) are transparent, (4) up to 300 chars of
+  other ancillary text is tolerated before stitching is rejected.
+  Combined with running ``detect_header_footer`` *before* the stitch
+  pass and forwarding the detected text as a transparent set, the
+  Old_FAQs Compliance document (42 pages) now collapses from 42
+  separate tables down to 22 (20 stitched pairs).
+- **Intra-table row continuation across page breaks.** When a single
+  table row's content wrapped onto the next page, upstream emitted
+  the wrap-over as a "mostly-empty row with text in one column" at
+  the top of the next table. Previously consumers had to glue these
+  back together themselves. ``stitch_cross_page_tables`` now detects
+  continuation rows (sparse row B whose non-empty cells are a subset
+  of row A's filled cells) and coalesces them by appending row B's
+  text to row A's matching cells. ``ConversionResult`` reports
+  ``continuation_rows_merged``.
+- **Single-marker false-positive list promotion.** ``apply_lists``
+  promoted any paragraph starting with ``1.``, ``a)``, or ``•`` even
+  when it was a one-off (e.g. a stray reference or section-numbering
+  artefact in the body). The pass now requires a run of >= 2
+  consecutive same-kind markers AND, for decimal lists, monotonic
+  numbering. List detection regex coverage extended to multi-level
+  ``1.1.``, paren-style ``(1)`` and roman ``(i)`` markers.
+- **Hyphenated compounds at line breaks getting de-hyphenated.**
+  Upstream's ``Lines.adjust_last_word`` deletes a trailing ``-`` when
+  the next line starts with a lowercase letter, which is correct for
+  typesetting wraps (``"informa-"`` + ``"tion"``) but wrong for real
+  compounds (``"Sub-Fund"`` -> ``"SubFund"``). New whitelist in
+  ``pdf2docx_plus.fidelity.hyphens`` covers common financial / legal
+  compounds (``Sub-Fund``, ``non-listed``, ``open-ended``, ...) so
+  even users that opt into ``delete_end_line_hyphen=True`` keep
+  these intact. The same whitelist also protects against the
+  ``repair_wrap_spacing`` pass adding stray whitespace inside the
+  hyphen.
+- **``promote_page_footer`` overwriting the wrong section's footer in
+  multi-section documents.** The previous implementation installed
+  the most-frequent "Last update" suffix as the footer for *every*
+  section, even sections whose body never carried the pattern. The
+  pass is now section-aware: it groups footer paragraphs by section
+  bucket, writes per-section footer text, and links consecutive
+  sections via ``is_linked_to_previous`` when they share content.
+- **``extract_headers_footers_to_section`` only working for
+  single-section documents.** The default is now True; the extractor
+  walks per-section body buckets, lifts ONE representative paragraph
+  per section, and ``is_linked_to_previous``-chains consecutive
+  sections that share the same chrome.
+- **``fit_wide_tables`` shifting floating-image positions.** The
+  column-fit and grid-realignment passes used to rewrite cell widths
+  even for tables containing ``<wp:anchor>``-positioned images, which
+  knocked the picture off its source location. Both passes now
+  detect floating images in the table and degrade gracefully:
+  ``align_tblgrid_to_cells`` skips the table entirely;
+  ``fit_oversized_tables`` clamps the ``<w:tblInd>`` (to stop the
+  table from running past the right margin) but leaves grid and cell
+  widths alone.
+- **Margin labels emitted as floating text frames.** Rotated
+  ``"Confidential"`` / ``"DRAFT"`` style margin labels were emitted
+  as anchored text frames that fragmented diffs and confused
+  downstream normalisation. New
+  ``pdf2docx_plus.layout.margin_labels`` module detects rotated /
+  tall-and-narrow text blocks in the page margin and removes them by
+  default (``drop_margin_labels_in_body=True``).
+- **Run-to-run non-determinism in embedded PNG bytes.** OpenCV's
+  ``imencode(".png", ...)`` lets libpng pick the compression level
+  and filter strategy adaptively, so the same source image could
+  serialise to different bytes across runs (and across CPUs).
+  ``pdf2docx_plus.fidelity.determinism`` monkey-patches
+  ``cv2.imencode`` to always pass
+  ``IMWRITE_PNG_COMPRESSION=6`` and
+  ``IMWRITE_PNG_STRATEGY_DEFAULT``. End-to-end check: two
+  independent conversions of the same 9-page PDF now produce
+  byte-identical DOCX archives across all internal files.
 - **Columns rendered at equal widths despite the cells carrying
   non-uniform widths.** Upstream sometimes emits ``<w:tblGrid>``
   with evenly-divided columns even when the underlying cells
