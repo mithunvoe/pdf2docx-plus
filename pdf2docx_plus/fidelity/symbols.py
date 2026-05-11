@@ -23,14 +23,11 @@ and fail to display the plain Unicode character.
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
-
 from pdf2docx_plus._vendored.pdf2docx.text import TextSpan as _ts
-
 
 # ---- Wingdings ------------------------------------------------------------
 # Source: https://en.wikipedia.org/wiki/Wingdings
-_WINGDINGS: Dict[str, str] = {
+_WINGDINGS: dict[str, str] = {
     # bullets / squares
     "\uf06c": "\u25cf",      # black circle (bullet)
     "\uf06d": "\u25a0",      # black square
@@ -71,7 +68,7 @@ _WINGDINGS: Dict[str, str] = {
 
 # ---- Symbol (Adobe) -------------------------------------------------------
 # Source: https://unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt
-_SYMBOL: Dict[str, str] = {
+_SYMBOL: dict[str, str] = {
     "\uf0b7": "\u2022",      # BULLET
     "\uf0b0": "\u00b0",      # DEGREE SIGN
     "\uf0a8": "\u2022",      # round bullet (Symbol)
@@ -96,7 +93,7 @@ def _normalise_font(raw: str | None) -> str:
     return s
 
 
-def _get_mapping(font: str) -> Tuple[Dict[str, str], str] | None:
+def _get_mapping(font: str) -> tuple[dict[str, str], str] | None:
     """Return (mapping, substitute font) or None.
 
     The substitute font must be one that's widely available on Windows,
@@ -126,13 +123,13 @@ def _get_mapping(font: str) -> Tuple[Dict[str, str], str] | None:
 # semantics outside those fonts, so translating them to Unicode is
 # always an improvement even when we can't positively identify the
 # source font.
-_FALLBACK: Dict[str, str] = {}
+_FALLBACK: dict[str, str] = {}
 _FALLBACK.update(_WINGDINGS)
 for _k, _v in _SYMBOL.items():
     _FALLBACK.setdefault(_k, _v)
 
 
-def translate(text: str, font: str) -> Tuple[str, str, bool]:
+def translate(text: str, font: str) -> tuple[str, str, bool]:
     """Return (translated_text, replacement_font, changed).
 
     When no mapping applies we return the inputs unchanged with

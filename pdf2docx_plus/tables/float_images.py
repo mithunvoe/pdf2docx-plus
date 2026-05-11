@@ -17,10 +17,12 @@ from typing import Any
 def _cell_bboxes(page: Any) -> list[tuple[float, float, float, float]]:
     out: list[tuple[float, float, float, float]] = []
     for block in _iter_blocks(page):
-        if not hasattr(block, "rows"):
+        if not getattr(block, "is_table_block", False):
             continue
-        for row in block.rows:
+        for row in block:
             for cell in row:
+                if cell is None:
+                    continue
                 bbox = getattr(cell, "bbox", None)
                 if bbox is None:
                     continue
@@ -43,8 +45,13 @@ def _iter_blocks(page: Any) -> list[Any]:
 
 
 def _is_image_block(block: Any) -> bool:
-    # Duck-type: ImageBlock has `image` attribute but no `lines` and no `rows`.
-    return hasattr(block, "image") and not hasattr(block, "lines") and not hasattr(block, "rows")
+    # Duck-type: ImageBlock has ``image`` attribute and no ``lines``;
+    # we explicitly reject TableBlocks (``is_table_block``) so we
+    # don't drop tables that happen to share the ``image`` attribute
+    # via subclass.
+    if getattr(block, "is_table_block", False):
+        return False
+    return hasattr(block, "image") and not hasattr(block, "lines")
 
 
 def _contained(

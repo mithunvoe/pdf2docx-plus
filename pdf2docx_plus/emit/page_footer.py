@@ -16,10 +16,15 @@ This pass:
      ``(\\d+\\s+)?Last update:\\s*.+`` and standalone digit-only
      paragraphs adjacent to them (bare page numbers).
   2. Removes them from the body.
-  3. Writes a single ``w:footer`` containing the static left-side text
-     and a right-aligned ``PAGE`` field, and attaches a
-     ``<w:footerReference>`` to every section so the footer renders on
-     every page.
+  3. Groups the matched paragraphs by section and writes a section
+     ``w:footer`` only for the sections that actually carried the
+     pattern.  Consecutive sections that share the same footer text
+     are collapsed via ``is_linked_to_previous``.  Sections that had
+     no matching footer paragraph keep their existing footer
+     untouched (previously the function installed the canonical
+     footer for *every* section, which was wrong for multi-section
+     documents whose section boundaries didn't line up with the
+     source pages).
 
 The pass is idempotent: a second invocation finds nothing to move.
 Invoked only when the caller opts in via the ``promote_page_footer``
@@ -41,71 +46,94 @@ _DIGIT_ONLY = re.compile(r"^\s*\d{1,4}\s*$")
 
 
 def promote_page_numbers_to_footer(document: Any) -> int:
-    """Move inline footer/page-number body text into a real ``w:footer``.
+    """Move inline footer/page-number body text into real ``w:footer`` parts.
 
     Two detection paths are tried in order:
 
     1. ``"N Last update: <date>"`` footer lines (upstream's typical
-       KFS-style footer). When found, the ``"Last update: <date>"``
-       suffix becomes the canonical left-side footer text and any
-       bare-digit paragraph sitting immediately before each footer
-       line is absorbed as a page number.
+       KFS-style footer). For each section that contains the
+       pattern, write a real footer with the most-frequent
+       ``Last update: <date>`` text seen in that section.  Sections
+       without the pattern are untouched.
     2. Bare-digit-only paragraphs that form a monotonically
        increasing step-1 sequence of length >= 3 (e.g. ``"1", "2",
        ..., "58"`` scattered one-per-source-page as in the
        First Sentier explanatory memos). When detected, the pass
-       installs a plain page-field footer with no left-side text.
+       removes the orphan page numbers from the body but does NOT
+       install a new footer (upstream per-page sections typically
+       have very tight bottom margins; installing our own footer
+       there measurably pushes content past the section boundary).
 
     Returns the number of body paragraphs absorbed. Returns 0 and
     makes no changes when neither pattern matches.
     """
     body = document.element.body
-    paragraphs = list(body.iter(qn("w:p")))
+    # Walk the body's direct children so we can attribute each
+    # paragraph to its section (the paragraph carrying ``<w:sectPr>``
+    # is the LAST paragraph of its section).
+    section_buckets: list[list[Any]] = [[]]
+    for child in body.iterchildren():
+        if child.tag == qn("w:p"):
+            section_buckets[-1].append(child)
+            if child.find(qn("w:pPr") + "/" + qn("w:sectPr")) is not None:
+                section_buckets.append([])
+    if section_buckets and not section_buckets[-1]:
+        section_buckets.pop()
 
-    footer_suffixes: Counter[str] = Counter()
-    footer_paras: list[Any] = []
-    for p in paragraphs:
-        text = _plain_text(p)
-        m = _FOOTER_LINE.match(text)
-        if m:
-            footer_suffixes[m.group(2).strip()] += 1
-            footer_paras.append(p)
+    sections = list(document.sections)
+    while len(section_buckets) < len(sections):
+        section_buckets.append([])
 
-    page_number_paras: list[Any] = []
-    canonical_left = ""
-    install_footer = False
-
-    if footer_suffixes:
-        # Path 1: explicit "Last update: ..." footer lines.
-        footer_set = set(id(p) for p in footer_paras)
-        for i, p in enumerate(paragraphs):
-            if id(p) not in footer_set:
+    # Path 1: per-section "Last update" detection.
+    section_footer_text: dict[int, str] = {}
+    matched_footer_paragraphs: list[Any] = []
+    matched_digit_paragraphs: list[Any] = []
+    for idx, bucket in enumerate(section_buckets):
+        if idx >= len(sections):
+            break
+        suffix_counts: Counter[str] = Counter()
+        footer_paras_in_section: list[Any] = []
+        for p in bucket:
+            text = _plain_text(p)
+            m = _FOOTER_LINE.match(text)
+            if m:
+                suffix_counts[m.group(2).strip()] += 1
+                footer_paras_in_section.append(p)
+        if not footer_paras_in_section:
+            continue
+        canonical_suffix = suffix_counts.most_common(1)[0][0]
+        section_footer_text[idx] = f"Last update: {canonical_suffix}"
+        matched_footer_paragraphs.extend(footer_paras_in_section)
+        # find adjacent bare-digit page numbers in the same section
+        bucket_positions = {id(p): i for i, p in enumerate(bucket)}
+        for p in footer_paras_in_section:
+            pos = bucket_positions.get(id(p))
+            if pos is None:
                 continue
-            j = i - 1
-            # walk back over empty paragraphs to find the previous visible one
-            while j >= 0 and not _plain_text(paragraphs[j]):
+            j = pos - 1
+            while j >= 0 and not _plain_text(bucket[j]):
                 j -= 1
-            if j >= 0:
-                prev = paragraphs[j]
-                if id(prev) not in footer_set and _DIGIT_ONLY.match(_plain_text(prev)):
-                    page_number_paras.append(prev)
-        canonical_suffix = footer_suffixes.most_common(1)[0][0]
-        canonical_left = f"Last update: {canonical_suffix}"
-        install_footer = True
-    else:
-        # Path 2: detect a bare-digit page-number sequence.
-        page_number_paras = _find_bare_page_number_sequence(paragraphs)
-        if not page_number_paras:
+            if j >= 0 and id(bucket[j]) not in bucket_positions and False:
+                continue
+            if j >= 0 and _DIGIT_ONLY.match(_plain_text(bucket[j])):
+                matched_digit_paragraphs.append(bucket[j])
+
+    bare_sequence: list[Any] = []
+    if not section_footer_text:
+        # Path 2: detect a global bare-digit page-number sequence.
+        all_paragraphs = [p for bucket in section_buckets for p in bucket]
+        bare_sequence = _find_bare_page_number_sequence(all_paragraphs)
+        if not bare_sequence:
             return 0
-        # Upstream per-page sections typically have very tight bottom
-        # margins; installing our own footer there measurably pushes
-        # content past the section boundary and re-inflates the page
-        # count. The bare-digit path therefore leaves upstream's
-        # footer references alone and only strips the orphan page
-        # numbers from the body.
 
     removed = 0
-    for p in footer_paras + page_number_paras:
+    # remove footer + digit paragraphs from the body
+    to_remove = list(matched_footer_paragraphs) + list(matched_digit_paragraphs) + list(bare_sequence)
+    seen: set[int] = set()
+    for p in to_remove:
+        if id(p) in seen:
+            continue
+        seen.add(id(p))
         parent = p.getparent()
         if parent is None:
             continue
@@ -121,9 +149,21 @@ def promote_page_numbers_to_footer(document: Any) -> int:
         parent.remove(p)
         removed += 1
 
-    if install_footer:
-        for section in document.sections:
-            _write_footer(section, canonical_left)
+    # install footers section-by-section
+    if section_footer_text:
+        prev_text: str | None = None
+        for idx, section in enumerate(sections):
+            text = section_footer_text.get(idx)
+            if text is None:
+                continue
+            if text == prev_text:
+                try:
+                    section.footer.is_linked_to_previous = True
+                except Exception:
+                    _write_footer(section, text)
+            else:
+                _write_footer(section, text)
+                prev_text = text
 
     return removed
 

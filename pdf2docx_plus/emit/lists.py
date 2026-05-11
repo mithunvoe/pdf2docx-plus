@@ -52,29 +52,107 @@ _LVL_TEXT = {
 
 
 def apply_lists(doc: Any) -> int:
-    """Promote marker-prefixed paragraphs in `doc` to real lists.
+    """Promote marker-prefixed paragraphs in ``doc`` to real lists.
+
+    Heuristic (sharper than upstream's naive per-paragraph check):
+
+    * Detect markers on every body paragraph in a single pass.
+    * Group consecutive same-kind markers into runs.
+    * For ``bullet``/``lower_alpha``/``upper_alpha``/``lower_roman``,
+      require a run of length >= 2 before promoting - one-shot bullets
+      look like data more often than they look like lists.
+    * For ``decimal``, accept a single marker only when its value is 1
+      AND the next non-list paragraph indents farther than the marker
+      paragraph (likely a numbered heading), but otherwise require
+      length >= 2.
+    * The first paragraph in a run carries ``start_at`` so Word
+      restarts numbering when the source switched lists mid-document.
 
     Returns the number of paragraphs converted.
     """
     numbering = _ensure_numbering_part(doc)
 
+    paragraphs = list(doc.paragraphs)
+    markers: list[ListMarker | None] = [detect_list_block(p.text) for p in paragraphs]
+
+    # Walk the markers and accept only when a run satisfies the
+    # threshold for its kind.  Track decimal counters so non-consecutive
+    # but sequential numbering is still promoted.
+    accept: list[bool] = [False] * len(markers)
+    i = 0
+    while i < len(markers):
+        m = markers[i]
+        if m is None:
+            i += 1
+            continue
+        # extend the run while subsequent paragraphs share kind
+        run_end = i + 1
+        while run_end < len(markers):
+            n = markers[run_end]
+            if n is None or n.kind != m.kind:
+                break
+            run_end += 1
+        run_len = run_end - i
+        if _accept_run(m.kind, run_len, markers[i:run_end]):
+            for k in range(i, run_end):
+                accept[k] = True
+        i = run_end
+
     kind_to_num_id: dict[str, int] = {}
     converted = 0
     prev_kind: str | None = None
-    for paragraph in doc.paragraphs:
-        text = paragraph.text
-        marker = detect_list_block(text)
-        if marker is None:
+    for paragraph, marker, ok in zip(paragraphs, markers, accept, strict=False):
+        if not (marker and ok):
             prev_kind = None
             continue
         num_id = kind_to_num_id.get(marker.kind)
         if num_id is None or marker.kind != prev_kind:
-            num_id = _allocate_num_id(numbering, marker.kind, start_at=marker.start_at or 1)
+            num_id = _allocate_num_id(
+                numbering, marker.kind, start_at=marker.start_at or 1
+            )
             kind_to_num_id[marker.kind] = num_id
         _apply_list_formatting(paragraph, marker, num_id)
         converted += 1
         prev_kind = marker.kind
     return converted
+
+
+def _accept_run(kind: str, length: int, run: list[ListMarker | None]) -> bool:
+    """Decide whether a run of consecutive same-kind markers should be
+    promoted to a real list.
+
+    Bullets and alpha/roman markers need a run of >= 2 to be a list.
+    Decimals are stricter: require >= 2 paragraphs *and* the numbers
+    have to be strictly increasing by 1 across the run (or start at 1
+    and increase monotonically) so paragraph-leading dates or section
+    numbers in tables aren't promoted.
+    """
+    if length < 1:
+        return False
+    if kind == "bullet":
+        return length >= 2
+    if kind in ("lower_alpha", "upper_alpha", "lower_roman"):
+        return length >= 2
+    if kind == "decimal":
+        if length < 2:
+            return False
+        nums = [m.start_at for m in run if m is not None]
+        # require monotonic-by-1 progression to filter out random
+        # "1. Foo", "5. Bar" patterns that aren't real lists.
+        from itertools import pairwise
+
+        for a, b in pairwise(nums):
+            if a is None or b is None:
+                return False
+            if b - a != 1:
+                # tolerate occasional skips (1, 2, 4) if at least 3 of
+                # the values are tight - upstream sometimes loses a
+                # numbered paragraph to a page break
+                if length >= 4 and 0 < b - a <= 2:
+                    continue
+                return False
+        return True
+    return False
 
 
 # -- numbering part -------------------------------------------------------

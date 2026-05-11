@@ -173,16 +173,26 @@ def collapse_empty_sections(document: Any) -> int:
     a page break, so the reader sees a blank page for every orphan
     section.
 
+    Also collapses **logo-only sections**: a section whose entire body
+    consists of a single small drawing (typically the page-header
+    image that upstream re-emits on every source-PDF page) and no
+    text, table, or other visual content.  Those sections render as
+    near-blank pages in the DOCX because the only thing on the page
+    is the logo and the real body content has been merged into a
+    neighbouring section by stitching or content recovery.
+
     This pass walks the body paragraphs in order, groups them into
     per-section buckets (each bucket ending at a paragraph whose
     ``<w:pPr>`` carries a ``<w:sectPr>``), and removes every bucket
-    that has no visible content. The final section - which uses the
-    body-level ``<w:sectPr>`` rather than a paragraph-level one - is
-    never removed; stripping it would orphan the whole document.
+    that has no meaningful content. The final section - which uses
+    the body-level ``<w:sectPr>`` rather than a paragraph-level one -
+    is never removed; stripping it would orphan the whole document.
 
-    "Visible content" means any ``<w:t>`` with non-whitespace text,
-    any ``<w:drawing>``, ``<w:pict>``, ``<w:object>``, or ``<w:tbl>``
-    between the previous section boundary and this one.
+    "Meaningful content" means: any ``<w:t>`` with non-whitespace
+    text, any ``<w:tbl>``, OR more than one drawing / pict / object
+    embedding.  A single drawing without any accompanying text is
+    treated as decorative chrome (the page-header logo) and
+    collapsing it is preferred.
 
     Returns the number of empty sections collapsed.
     """
@@ -213,15 +223,28 @@ def collapse_empty_sections(document: Any) -> int:
 
 
 def _bucket_has_content(bucket: list[Any]) -> bool:
+    has_text = False
+    has_table = False
+    drawing_count = 0
     for el in bucket:
         if el.tag == qn("w:tbl"):
-            return True
+            has_table = True
+            break
         for t in el.iter(qn("w:t")):
             if (t.text or "").strip():
-                return True
+                has_text = True
+                break
+        if has_text:
+            break
         for tag in ("w:drawing", "w:pict", "w:object"):
-            if el.find(".//" + qn(tag)) is not None:
-                return True
+            for d in el.iter(qn(tag)):
+                drawing_count += 1
+                if drawing_count > 1:
+                    return True
+    if has_table or has_text:
+        return True
+    # Exactly one drawing and nothing else: treat as decorative
+    # chrome (the per-page header logo). Collapse the section.
     return False
 
 
