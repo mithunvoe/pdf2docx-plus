@@ -4,6 +4,25 @@
 
 ### Fixed
 
+- **Cross-page row coalescing silently dropped continuation content.**
+  ``stitch._coalesce_row`` transferred the source cell's text into the
+  destination by writing to ``last_span.text`` on the destination's
+  trailing span. ``TextSpan.text`` is a property whose getter returns
+  ``''.join(c.c for c in self.chars)`` whenever ``self.chars`` is
+  populated, ignoring the ``_text`` field the setter writes. Every span
+  parsed from a real PDF carries ``chars``, so the assignment was a
+  silent no-op and 100% of the continuation row's text vanished from
+  the output. The symptom was magnitude-dependent: a Q&A row whose
+  answer wrapped across a page break would land in the DOCX with the
+  pre-break text plus a one-character span, missing every mid-cell
+  bullet and sub-list that lived on the wrapping page. New
+  ``_transfer_cell_blocks`` helper appends whole text blocks from the
+  source cell into the destination's ``Blocks._instances`` list,
+  preserving structure (font, bbox, chars) and avoiding the property-
+  setter trap entirely. Regression coverage in
+  ``tests/test_stitch_coalesce.py`` builds the exact ``chars``-backed
+  span shape that triggered the bug.
+
 - **Inline images forced into ``<wp:anchor>`` instead of ``<wp:inline>``.**
   ``pdf2docx_plus._vendored.pdf2docx.common.docx.add_image`` (the
   function that ``Image.make_docx`` calls for *every* inline image
