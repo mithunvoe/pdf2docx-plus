@@ -4,6 +4,16 @@ from docx.shared import Pt
 from ..common.Element import Element
 from ..layout.Layout import Layout
 from ..common import docx
+from ..common import constants
+
+
+# Issue P-2: extra margin (PDF points) added to the cell bbox when
+# checking containment of glyph runs.  Real fund-prospectus PDFs centre
+# narrow column text slightly outside the inferred cell grid bbox; the
+# original strict containment dropped that text, surfacing in the
+# converted DOCX as an empty rightmost-column cell (and downstream as a
+# missed "Not applicable" / "Up to 0.05 %" deletion in redlines).
+_CELL_CONTAINS_TOL = 1.0
 
 
 class Cell(Layout):
@@ -18,6 +28,65 @@ class Cell(Layout):
         self.border_color = raw.get('border_color', (0,0,0,0)) # type: tuple [int]
         self.border_width = raw.get('border_width', (0,0,0,0)) # type: tuple [float]
         self.merged_cells = raw.get('merged_cells', (1,1)) # type: tuple [int]
+
+    def contains(self, e:'Element', threshold:float=1.0):
+        '''Issue P-2: loosened cell containment.
+
+        The base ``Element.contains`` uses a strict bbox-intersection
+        ratio; on real fund-prospectus PDFs, narrow rightmost-column
+        text is centred a hair outside the inferred cell grid bbox and
+        therefore reports as "not contained".  The block is then
+        dropped, producing an empty ``<w:tc>`` and a missed deletion in
+        the downstream redline.
+
+        We relax the check in two ways while preserving the strict
+        behaviour everywhere else:
+
+        * The cell's bbox is expanded by ``_CELL_CONTAINS_TOL`` (1 pt)
+          on each side before the area check.
+        * If the strict area check fails but the candidate element's
+          centre point falls inside the expanded cell bbox, the element
+          counts as contained.  This recovers text-clusters that cross
+          a single boundary by a fraction of a glyph width without
+          disturbing assignments where the element clearly sits in a
+          different cell.
+        '''
+        if not e or not bool(e.bbox):
+            return False
+
+        expanded = self.bbox + (
+            -_CELL_CONTAINS_TOL,
+            -_CELL_CONTAINS_TOL,
+            _CELL_CONTAINS_TOL,
+            _CELL_CONTAINS_TOL,
+        )
+
+        # First try the original area-ratio test against the EXPANDED bbox.
+        # This is the dominant case and exactly mirrors Element.contains
+        # without disturbing its semantics.
+        S = e.bbox.get_area()
+        if S:
+            intersection = expanded & e.bbox
+            factor = round(intersection.get_area() / S, 2)
+            if factor >= threshold:
+                # length check on the expanded bbox
+                if expanded.width >= expanded.height:
+                    if expanded.width + constants.MINOR_DIST >= e.bbox.width:
+                        return True
+                else:
+                    if expanded.height + constants.MINOR_DIST >= e.bbox.height:
+                        return True
+
+        # Centre-containment fallback: if the element's centre is inside
+        # the expanded cell bbox, treat as contained.  This rescues
+        # narrow centred glyph runs whose bbox crosses the cell edge by
+        # a fraction of the glyph width.
+        cx = (e.bbox.x0 + e.bbox.x1) / 2.0
+        cy = (e.bbox.y0 + e.bbox.y1) / 2.0
+        return (
+            expanded.x0 <= cx <= expanded.x1
+            and expanded.y0 <= cy <= expanded.y1
+        )
 
     def _block_text(self, block):
         '''Get text from a block, always returning a str (for join).'''
