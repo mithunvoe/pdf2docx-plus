@@ -25,6 +25,7 @@ from .page_footer import promote_page_numbers_to_footer
 from .sections import (
     clamp_paragraph_spacing,
     collapse_empty_sections,
+    consolidate_identical_sections,
     fix_page_margins,
     flatten_per_page_sections,
     normalize_multi_column_sections,
@@ -46,6 +47,7 @@ __all__ = [
     "clamp_paragraph_spacing",
     "collapse_empty_paragraphs",
     "collapse_empty_sections",
+    "consolidate_identical_sections",
     "drop_empty_tables",
     "extract_headers_footers",
     "fit_oversized_tables",

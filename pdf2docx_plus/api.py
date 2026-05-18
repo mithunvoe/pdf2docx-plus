@@ -38,6 +38,7 @@ from .emit import (
     clamp_paragraph_spacing,
     collapse_empty_paragraphs,
     collapse_empty_sections,
+    consolidate_identical_sections,
     drop_empty_tables,
     extract_headers_footers,
     fit_oversized_tables,
@@ -124,6 +125,7 @@ class ConversionResult:
     empty_sections_collapsed: int = 0
     oversized_tables_fit: int = 0
     tables_split_visually_separated: int = 0
+    sections_consolidated: int = 0
     tblgrids_aligned: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
@@ -751,6 +753,22 @@ class Converter:
                             result.empty_sections_collapsed = collapsed
                     except Exception as e:
                         _log.debug("empty-section collapse skipped: %s", e)
+                # Issue P-4: consolidate consecutive sectPrs that share
+                # all layout properties.  Runs AFTER collapse_empty_sects
+                # so empty-section removal doesn't leave behind orphan
+                # markers, and AFTER flatten_per_page_sections so the
+                # remaining sections are all continuous breaks (any
+                # nextPage/oddPage signal would normally indicate a
+                # genuine layout transition and we wouldn't want to
+                # drop it).
+                if pp.get("collapse_empty_sects"):
+                    try:
+                        merged_sects = consolidate_identical_sections(doc)
+                        if merged_sects:
+                            dirty = True
+                            result.sections_consolidated = merged_sects
+                    except Exception as e:
+                        _log.debug("section consolidation skipped: %s", e)
                 if pp.get("explicit_page_breaks"):
                     try:
                         inserted = insert_page_breaks(doc)
