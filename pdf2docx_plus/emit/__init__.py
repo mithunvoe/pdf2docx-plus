@@ -18,6 +18,7 @@ Passes:
 
 from __future__ import annotations
 
+from .checkbox_glyphs import canonicalise_checkbox_glyphs
 from .headers_footers import extract_headers_footers
 from .lists import apply_lists
 from .page_breaks import insert_page_breaks
@@ -44,6 +45,7 @@ from .word_spacing import repair_wrap_spacing
 __all__ = [
     "align_tblgrid_to_cells",
     "apply_lists",
+    "canonicalise_checkbox_glyphs",
     "clamp_paragraph_spacing",
     "collapse_empty_paragraphs",
     "collapse_empty_sections",

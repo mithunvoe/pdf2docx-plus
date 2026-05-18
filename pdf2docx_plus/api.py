@@ -35,6 +35,7 @@ from .consolidate import consolidate_runs
 from .emit import (
     align_tblgrid_to_cells,
     apply_lists,
+    canonicalise_checkbox_glyphs,
     clamp_paragraph_spacing,
     collapse_empty_paragraphs,
     collapse_empty_sections,
@@ -126,6 +127,7 @@ class ConversionResult:
     oversized_tables_fit: int = 0
     tables_split_visually_separated: int = 0
     sections_consolidated: int = 0
+    checkbox_glyphs_canonicalised: int = 0
     tblgrids_aligned: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
@@ -769,6 +771,17 @@ class Converter:
                             result.sections_consolidated = merged_sects
                     except Exception as e:
                         _log.debug("section consolidation skipped: %s", e)
+                # Issue P-1: canonicalise empty-checkbox glyph variants.
+                # Runs unconditionally because it's pure text-normalisation
+                # (no side effect on tables / sections / images) and the
+                # only failure mode is "no changes needed".
+                try:
+                    cb = canonicalise_checkbox_glyphs(doc)
+                    if cb:
+                        dirty = True
+                        result.checkbox_glyphs_canonicalised = cb
+                except Exception as e:
+                    _log.debug("checkbox glyph canonicalisation skipped: %s", e)
                 if pp.get("explicit_page_breaks"):
                     try:
                         inserted = insert_page_breaks(doc)
