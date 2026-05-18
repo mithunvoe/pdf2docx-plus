@@ -35,7 +35,7 @@ from ..common.Element import Element
 from ..common.share import (RectType, rgb_value, rgb_component, decode)
 from ..common import constants
 from ..common import docx
-from ..shape.Shape import Shape
+from ..shape.Shape import Shape, _is_highlight_color
 
 
 class TextSpan(Element):
@@ -306,8 +306,13 @@ class TextSpan(Element):
 
         # highlight: both the rect height and overlap must be large enough
         if h_rect >= 0.5*h_span:
-            # In general, highlight color isn't white
+            # In general, highlight color isn't white.  Also reject fills
+            # whose colour is too desaturated to plausibly be highlighter ink
+            # (Issue P-5): paragraph rules, decorative bands, and anti-alias
+            # halos look like fills geometrically but are near-grey, which
+            # otherwise leaks into the output as phantom <w:highlight> runs.
             if rect.color != rgb_value((1,1,1)) and \
+                _is_highlight_color(rect.color) and \
                 self.get_main_bbox(rect, constants.FACTOR_MAJOR):
                 rect.type = RectType.HIGHLIGHT
 
