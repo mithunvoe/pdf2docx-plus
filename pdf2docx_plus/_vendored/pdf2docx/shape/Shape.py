@@ -47,8 +47,46 @@ Data structure::
 
 import fitz
 from ..common.Element import Element
-from ..common.share import RectType
+from ..common.share import RectType, rgb_component
 from ..common import constants
+
+
+# Minimum HSV saturation for a Fill to be classified as a text highlight.
+# Real highlighter ink (yellow/green/pink/cyan) is high saturation (>= 0.4);
+# decorative grid rules, indent guides, anti-aliasing artefacts and page chrome
+# tend to be near-greyscale (saturation close to 0).  Requiring this gate
+# prevents the converter from emitting phantom `<w:highlight>` runs on
+# documents that contain no real highlights.
+HIGHLIGHT_MIN_SATURATION = 0.4
+
+# Minimum overlap fraction (Fill area inside text bbox / Fill area) for the
+# Fill to be treated as a real text highlight.  A real highlighter strip
+# essentially overlays the glyph run; decorative bands rarely overlap by
+# more than half of their area.
+HIGHLIGHT_MIN_OVERLAP = 0.7
+
+
+def _hsv_saturation(srgb: int) -> float:
+    """HSV saturation of an sRGB color value packed as 0xRRGGBB."""
+    try:
+        r, g, b = rgb_component(srgb)
+    except Exception:
+        return 0.0
+    mx = max(r, g, b)
+    mn = min(r, g, b)
+    if mx == 0:
+        return 0.0
+    return (mx - mn) / float(mx)
+
+
+def _is_highlight_color(srgb: int) -> bool:
+    """Return True when ``srgb`` looks like real highlighter ink.
+
+    Cheap saturation gate that lets us reject near-grey, white, and very dark
+    fills (anti-aliasing, decorative rules) before they get promoted to
+    `<w:highlight>` runs.
+    """
+    return _hsv_saturation(srgb) > HIGHLIGHT_MIN_SATURATION
 
 
 class Shape(Element):
@@ -306,10 +344,10 @@ class Fill(Shape):
 
         Returns:
             RectType: Semantic type of this shape.
-        
+
         .. note::
             Generally, table shading always contains at least one line, while text highlight never
-            contains any lines. But in real cases, with margin exists, table shading may not 100% 
+            contains any lines. But in real cases, with margin exists, table shading may not 100%
             contain a line.
         '''
         # check main dimension
@@ -318,17 +356,51 @@ class Fill(Shape):
 
         # check orientation
         h_line = line.is_horizontal_text
-        if h_shape != h_line: 
+        if h_shape != h_line:
             return self.default_type
 
-        if not self.get_main_bbox(line, threshold=constants.FACTOR_MAJOR): 
+        if not self.get_main_bbox(line, threshold=constants.FACTOR_MAJOR):
             return self.default_type
-        
-        w_line = line.bbox.width if h_line else line.bbox.height            
+
+        w_line = line.bbox.width if h_line else line.bbox.height
         if w_shape <= w_line + 2*constants.MINOR_DIST: # 1 pt tolerance at both sides
+            # Tighter highlight gate (Issue P-5): refuse to classify the Fill as
+            # a text highlight unless it actually overlaps the text bbox AND has
+            # the saturation profile of a real highlighter colour.  This
+            # eliminates phantom green/yellow highlights driven by decorative
+            # PDF guides, paragraph rules, and table grid anti-aliasing on
+            # fund-prospectus documents.
+            if not self._looks_like_real_highlight(line):
+                return RectType.SHADING.value
             return RectType.HIGHLIGHT.value
         else:
-            return RectType.SHADING.value        
+            return RectType.SHADING.value
+
+
+    def _looks_like_real_highlight(self, line) -> bool:
+        '''Return True only when this Fill looks like a real highlighter strip
+        applied to ``line``.
+
+        Requires both:
+
+        * Fill-area-to-text-bbox overlap >= ``HIGHLIGHT_MIN_OVERLAP``.  A real
+          highlighter strip overlays the glyph run almost completely; decorative
+          fills behind text rarely do.
+        * HSV saturation > ``HIGHLIGHT_MIN_SATURATION``.  Real highlighter
+          colours are vivid (yellow, green, pink, cyan).  Near-grey or very
+          dark fills are anti-aliasing / chrome / paragraph rules.
+        '''
+        # overlap gate
+        fill_area = self.bbox.get_area()
+        if fill_area <= 0:
+            return False
+        intersection = self.bbox & line.bbox
+        overlap_area = intersection.get_area() if intersection else 0.0
+        if overlap_area / fill_area < HIGHLIGHT_MIN_OVERLAP:
+            return False
+
+        # saturation gate
+        return _is_highlight_color(self.color)
 
 
 class Hyperlink(Shape):

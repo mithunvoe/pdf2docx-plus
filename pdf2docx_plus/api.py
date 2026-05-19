@@ -35,9 +35,11 @@ from .consolidate import consolidate_runs
 from .emit import (
     align_tblgrid_to_cells,
     apply_lists,
+    canonicalise_checkbox_glyphs,
     clamp_paragraph_spacing,
     collapse_empty_paragraphs,
     collapse_empty_sections,
+    consolidate_identical_sections,
     drop_empty_tables,
     extract_headers_footers,
     fit_oversized_tables,
@@ -48,6 +50,7 @@ from .emit import (
     normalize_multi_column_sections,
     promote_page_numbers_to_footer,
     repair_wrap_spacing,
+    split_visually_separated_tables,
     trim_empty_table_rows,
     unwrap_tiny_tables,
 )
@@ -122,6 +125,9 @@ class ConversionResult:
     wrap_spaces_repaired: int = 0
     empty_sections_collapsed: int = 0
     oversized_tables_fit: int = 0
+    tables_split_visually_separated: int = 0
+    sections_consolidated: int = 0
+    checkbox_glyphs_canonicalised: int = 0
     tblgrids_aligned: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
@@ -715,6 +721,14 @@ class Converter:
                         if dropped:
                             dirty = True
                             result.empty_tables_dropped = dropped
+                        # split mega-tables BEFORE merging single-row tables
+                        # so internal header-row repetition is broken into
+                        # discrete logical tables; if we merge first, the
+                        # signal disappears and stacked fee tables stay fused.
+                        split_t = split_visually_separated_tables(doc)
+                        if split_t:
+                            dirty = True
+                            result.tables_split_visually_separated = split_t
                         merged = merge_consecutive_single_row_tables(doc)
                         if merged:
                             dirty = True
@@ -741,6 +755,33 @@ class Converter:
                             result.empty_sections_collapsed = collapsed
                     except Exception as e:
                         _log.debug("empty-section collapse skipped: %s", e)
+                # Issue P-4: consolidate consecutive sectPrs that share
+                # all layout properties.  Runs AFTER collapse_empty_sects
+                # so empty-section removal doesn't leave behind orphan
+                # markers, and AFTER flatten_per_page_sections so the
+                # remaining sections are all continuous breaks (any
+                # nextPage/oddPage signal would normally indicate a
+                # genuine layout transition and we wouldn't want to
+                # drop it).
+                if pp.get("collapse_empty_sects"):
+                    try:
+                        merged_sects = consolidate_identical_sections(doc)
+                        if merged_sects:
+                            dirty = True
+                            result.sections_consolidated = merged_sects
+                    except Exception as e:
+                        _log.debug("section consolidation skipped: %s", e)
+                # Issue P-1: canonicalise empty-checkbox glyph variants.
+                # Runs unconditionally because it's pure text-normalisation
+                # (no side effect on tables / sections / images) and the
+                # only failure mode is "no changes needed".
+                try:
+                    cb = canonicalise_checkbox_glyphs(doc)
+                    if cb:
+                        dirty = True
+                        result.checkbox_glyphs_canonicalised = cb
+                except Exception as e:
+                    _log.debug("checkbox glyph canonicalisation skipped: %s", e)
                 if pp.get("explicit_page_breaks"):
                     try:
                         inserted = insert_page_breaks(doc)

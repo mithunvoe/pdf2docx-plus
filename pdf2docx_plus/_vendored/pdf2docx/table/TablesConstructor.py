@@ -199,12 +199,133 @@ class TablesConstructor:
                 table.num_cols*table.num_rows==1 and table[0][0].bg_color is None:
                 continue
 
+            # Issue P-6: refuse to promote a 1x1 stream-table region to a
+            # `<w:tbl>` when the only "table" signal is a stray fill or an
+            # indent guide.  Item-lists and "(ii) …" paragraphs in fund
+            # prospectuses routinely get wrapped in a 1x1 pseudo-table this
+            # way, which downstream then diffs as a wholesale delete + insert
+            # because the same content on the other side of the comparison
+            # renders as ordinary body paragraphs.
+            #
+            # Strict-table signals required to keep a 1x1 promotion:
+            #   * a real stroked border (>= 0.5 pt) on >= 3 sides of the
+            #     table region, OR
+            #   * an explicit non-grey shading filling the cell (already a
+            #     strong "this is a callout box" signal).
+            if table.num_cols * table.num_rows == 1 and \
+                    not TablesConstructor._has_strict_table_signal(
+                        table, explicit_strokes, explicit_shadings):
+                continue
+
             table.set_stream_table_block()
             tables.append(table)
 
         # assign blocks/shapes to each table
         self._blocks.assign_to_tables(tables)
         self._shapes.assign_to_tables(tables)
+
+
+    # Minimum stroke width (PDF points) for a stroke to count as a real
+    # table border (Issue P-6).  Anti-aliased decorative rules tend to
+    # be < 0.5 pt; explicit table borders are typically 0.5-1.5 pt.
+    _STRICT_BORDER_WIDTH_PT = 0.5
+
+    # Tolerance (PDF points) for a stroke to be considered touching one of
+    # the four edges of a candidate 1x1 cell.
+    _STRICT_BORDER_EDGE_TOL = 2.0
+
+    @staticmethod
+    def _has_strict_table_signal(table, explicit_strokes, explicit_shadings):
+        '''Issue P-6: did this 1x1 stream-table region show a strong
+        "real table" signal in the PDF, as opposed to a stray fill or an
+        indent guide masquerading as a border?
+
+        Strong signals (any one is sufficient):
+
+        * an explicit cell shading covering the cell area, OR
+        * real stroked borders (>= ``_STRICT_BORDER_WIDTH_PT``) on at
+          least 3 of the 4 sides of the cell bbox.
+
+        Args:
+            table: ``TableBlock`` just constructed for this region.
+            explicit_strokes (Shapes): strokes inside the table's outer
+                bbox.
+            explicit_shadings (Shapes): fills inside the table's outer
+                bbox.
+
+        Returns:
+            bool: True when the promotion should be kept; False when the
+            region is almost certainly a phantom 1x1 pseudo-table that
+            should be re-emitted as ordinary body paragraphs.
+        '''
+        if not table or table.num_rows*table.num_cols != 1:
+            # outside the 1x1 case we don't second-guess the heuristic
+            return True
+
+        # Signal 1: an explicit shading covers the cell — strong "callout
+        # box" cue.  We check after table construction because shadings
+        # surviving here have already passed the parser's filter.
+        cell = table[0][0]
+        if cell.bg_color is not None:
+            return True
+        # Some explicit shadings may sit at table-level (e.g. fill
+        # covering the entire single cell).  If the table has any
+        # non-white shading attached, treat it as a strict signal.
+        for fill in (explicit_shadings or []):
+            if getattr(fill, 'color', None) not in (None, 0xFFFFFF):
+                # only count shadings that meaningfully cover the cell
+                if fill.bbox.intersects(cell.bbox):
+                    inter = fill.bbox & cell.bbox
+                    if inter.get_area() / max(cell.bbox.get_area(), 1e-6) >= 0.5:
+                        return True
+
+        # Signal 2: real stroked borders on >= 3 of the 4 sides.
+        sides_covered = TablesConstructor._count_real_border_sides(
+            cell.bbox, explicit_strokes)
+        return sides_covered >= 3
+
+    @staticmethod
+    def _count_real_border_sides(cell_bbox, strokes):
+        '''Count how many of the 4 sides of ``cell_bbox`` have a stroke
+        with width >= ``_STRICT_BORDER_WIDTH_PT`` lying along them.
+
+        A stroke counts for a side when it spans most of the side's
+        length AND its perpendicular offset is within
+        ``_STRICT_BORDER_EDGE_TOL`` of the side coordinate.
+        '''
+        if not strokes:
+            return 0
+        x0, y0, x1, y1 = cell_bbox.x0, cell_bbox.y0, cell_bbox.x1, cell_bbox.y1
+        tol = TablesConstructor._STRICT_BORDER_EDGE_TOL
+        min_w = TablesConstructor._STRICT_BORDER_WIDTH_PT
+        cw = max(x1 - x0, 1e-6)
+        ch = max(y1 - y0, 1e-6)
+        sides = {'top': False, 'bottom': False, 'left': False, 'right': False}
+        for stroke in strokes:
+            w = getattr(stroke, 'width', 0.0) or 0.0
+            if w < min_w:
+                continue
+            sx0, sy0, sx1, sy1 = stroke.bbox.x0, stroke.bbox.y0, stroke.bbox.x1, stroke.bbox.y1
+            is_horizontal = (sx1 - sx0) >= (sy1 - sy0)
+            if is_horizontal:
+                length = sx1 - sx0
+                if length < cw * 0.6:
+                    continue
+                y_mid = (sy0 + sy1) / 2.0
+                if abs(y_mid - y0) <= tol:
+                    sides['top'] = True
+                elif abs(y_mid - y1) <= tol:
+                    sides['bottom'] = True
+            else:
+                length = sy1 - sy0
+                if length < ch * 0.6:
+                    continue
+                x_mid = (sx0 + sx1) / 2.0
+                if abs(x_mid - x0) <= tol:
+                    sides['left'] = True
+                elif abs(x_mid - x1) <= tol:
+                    sides['right'] = True
+        return sum(1 for v in sides.values() if v)
 
 
     @staticmethod

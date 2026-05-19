@@ -248,6 +248,107 @@ def _bucket_has_content(bucket: list[Any]) -> bool:
     return False
 
 
+def consolidate_identical_sections(document: Any) -> int:
+    """Issue P-4: drop mid-document `<w:sectPr>` boundaries that don't
+    change any logical layout property.
+
+    Upstream `pdf2docx` emits one `<w:sectPr>` per source PDF page even
+    when consecutive pages share identical page size, margins, columns,
+    and orientation.  Two PDFs that are logically the same therefore
+    end up with different section counts purely because of page-count
+    drift (e.g. Bosera OLD=14 vs NEW=17), which then breaks downstream
+    header/footer matching that aligns sections by index.
+
+    This pass keeps the first sectPr and the final body-level sectPr,
+    and removes every mid-document sectPr whose section properties
+    match the previously-retained section.  "Match" compares the
+    structural attributes that actually affect rendering:
+
+    * page size (``w:pgSz`` width / height / orientation),
+    * page margins (``w:pgMar``),
+    * number of columns and column spacing (``w:cols``),
+    * header / footer references (``w:headerReference`` /
+      ``w:footerReference``),
+    * page numbering format (``w:pgNumType``).
+
+    Sections that differ in any of those are kept — they encode a real
+    layout transition the document depends on.
+
+    Returns the number of redundant section breaks removed.
+    """
+    body = document.element.body
+    sect_prs = list(body.iter(qn("w:sectPr")))
+    if len(sect_prs) <= 1:
+        return 0
+
+    # The final sectPr is body-level (not wrapped in a paragraph's pPr).
+    # Mid-document sectPrs are inside <w:pPr>.  We only consolidate
+    # mid-document ones — stripping the body-level sectPr would orphan
+    # the document trailer.
+    mid_doc = [
+        sp for sp in sect_prs
+        if sp.getparent() is not None and sp.getparent().tag == qn("w:pPr")
+    ]
+    if not mid_doc:
+        return 0
+
+    removed = 0
+    last_sig = _section_signature(sect_prs[0])
+    keep_first = sect_prs[0]
+    for sp in sect_prs[1:]:
+        if sp is keep_first:
+            continue
+        # only consider removing mid-doc sectPrs
+        parent = sp.getparent()
+        if parent is None or parent.tag != qn("w:pPr"):
+            # body-level (final) sectPr — always keep
+            last_sig = _section_signature(sp)
+            continue
+        sig = _section_signature(sp)
+        if sig == last_sig:
+            # redundant: remove the sectPr from the pPr, and drop the
+            # pPr-only paragraph if it becomes empty (a section-marker
+            # paragraph with nothing else is just chrome).
+            parent.remove(sp)
+            # also remove the parent <w:pPr> if it now has no children
+            if len(parent) == 0:
+                pPr_parent = parent.getparent()
+                if pPr_parent is not None:
+                    pPr_parent.remove(parent)
+            removed += 1
+        else:
+            last_sig = sig
+    return removed
+
+
+def _section_signature(sect_pr: Any) -> tuple:
+    """Capture the structural attributes of a `<w:sectPr>` that affect
+    rendering.  Two sectPrs with equal signatures are functionally
+    interchangeable.
+    """
+    def _attrs(tag_name: str, attr_names: tuple[str, ...]) -> tuple:
+        el = sect_pr.find(qn(tag_name))
+        if el is None:
+            return ()
+        return tuple(el.get(qn(a)) for a in attr_names)
+
+    pg_sz = _attrs("w:pgSz", ("w:w", "w:h", "w:orient"))
+    pg_mar = _attrs(
+        "w:pgMar",
+        ("w:top", "w:right", "w:bottom", "w:left", "w:header", "w:footer", "w:gutter"),
+    )
+    cols = _attrs("w:cols", ("w:num", "w:space", "w:equalWidth"))
+    pg_num = _attrs("w:pgNumType", ("w:fmt", "w:start"))
+    # header/footer references collapse to a sorted tuple of (type, id) pairs
+    refs: list[tuple[str, str]] = []
+    for tag in ("w:headerReference", "w:footerReference"):
+        for r in sect_pr.findall(qn(tag)):
+            refs.append(
+                (tag, r.get(qn("w:type")) or "", r.get(qn("r:id")) or "")
+            )
+    return (pg_sz, pg_mar, cols, pg_num, tuple(sorted(refs)))
+
+
 def clamp_paragraph_spacing(document: Any, *, max_twips: int = 480) -> int:
     """Cap `w:spacing w:before` / `w:after` at `max_twips`.
 

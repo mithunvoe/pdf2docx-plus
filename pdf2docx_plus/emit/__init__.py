@@ -18,6 +18,7 @@ Passes:
 
 from __future__ import annotations
 
+from .checkbox_glyphs import canonicalise_checkbox_glyphs
 from .headers_footers import extract_headers_footers
 from .lists import apply_lists
 from .page_breaks import insert_page_breaks
@@ -25,6 +26,7 @@ from .page_footer import promote_page_numbers_to_footer
 from .sections import (
     clamp_paragraph_spacing,
     collapse_empty_sections,
+    consolidate_identical_sections,
     fix_page_margins,
     flatten_per_page_sections,
     normalize_multi_column_sections,
@@ -33,6 +35,7 @@ from .table_fit import align_tblgrid_to_cells, fit_oversized_tables
 from .tables_cleanup import (
     drop_empty_tables,
     merge_consecutive_single_row_tables,
+    split_visually_separated_tables,
     trim_empty_table_rows,
     unwrap_tiny_tables,
 )
@@ -42,9 +45,11 @@ from .word_spacing import repair_wrap_spacing
 __all__ = [
     "align_tblgrid_to_cells",
     "apply_lists",
+    "canonicalise_checkbox_glyphs",
     "clamp_paragraph_spacing",
     "collapse_empty_paragraphs",
     "collapse_empty_sections",
+    "consolidate_identical_sections",
     "drop_empty_tables",
     "extract_headers_footers",
     "fit_oversized_tables",
@@ -55,6 +60,7 @@ __all__ = [
     "normalize_multi_column_sections",
     "promote_page_numbers_to_footer",
     "repair_wrap_spacing",
+    "split_visually_separated_tables",
     "trim_empty_table_rows",
     "unwrap_tiny_tables",
 ]

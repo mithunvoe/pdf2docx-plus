@@ -154,6 +154,67 @@ def unwrap_tiny_tables(
     return unwrapped
 
 
+def split_visually_separated_tables(
+    document: Any,
+    *,
+    header_repeat_threshold: int = 2,
+) -> int:
+    """Split a `<w:tbl>` into multiple tables when the upstream layout
+    parser fused logically-distinct tables into a single mega-table.
+
+    Issue P-3 from PDF_FIDELITY_PDF2DOCX_PLAN.md: fund-prospectus
+    layouts contain multiple fee tables stacked vertically with
+    identical column grids on the same page.  `pdf2docx-plus`'s stream
+    table promoter aggregates them into one `TableBlock` (and therefore
+    one `<w:tbl>` in the output), which collapses the natural table
+    boundaries and confuses any downstream diff that aligns tables by
+    index.
+
+    Heuristic: walk every `<w:tbl>` and identify row indices where a
+    header row repeats inside the table.  Header detection uses the
+    text signature of row 0: any later row whose cell-text tuple equals
+    row 0's signature is treated as the start of a new logical table.
+    Split at those boundaries.
+
+    Importantly, this is safe vs. the existing cross-page stitch logic
+    (``pdf2docx_plus.tables.stitch``).  That stitcher already drops the
+    second table's header row when stitching genuine page-spanning
+    continuations (FAQ / SFT / TRS pattern), so a correctly-stitched
+    FAQ table never contains an internal header repeat and is therefore
+    untouched by this pass.
+
+    Args:
+        document: python-docx ``Document``-like instance.
+        header_repeat_threshold: minimum number of non-empty cells the
+            row 0 signature must have for a later equal row to count as
+            a header repeat.  A single-column or near-empty row 0 is
+            too weak a signature.
+
+    Returns:
+        Number of new tables introduced (= total splits performed).
+    """
+    body = document.element.body
+    splits = 0
+    for tbl in list(body.findall(qn("w:tbl"))):
+        rows = tbl.findall(qn("w:tr"))
+        if len(rows) < 3:
+            continue
+        header_sig = _row_text_signature(rows[0])
+        non_empty = sum(1 for cell in header_sig if cell)
+        if non_empty < header_repeat_threshold:
+            continue
+        # collect indices (1-based: never split before row 0) where a row
+        # repeats the header signature.
+        split_indices: list[int] = []
+        for idx in range(1, len(rows)):
+            if _row_text_signature(rows[idx]) == header_sig:
+                split_indices.append(idx)
+        if not split_indices:
+            continue
+        splits += _split_table_at_indices(tbl, rows, split_indices, body)
+    return splits
+
+
 def drop_empty_tables(document: Any, *, max_cells: int = 9) -> int:
     """Remove small tables whose every cell is empty.
 
@@ -300,3 +361,70 @@ def _is_empty_paragraph(p: Any) -> bool:
         if (t.text or "").strip():
             return False
     return p.find(f".//{qn('w:drawing')}") is None
+
+
+def _row_text_signature(tr: Any) -> tuple[str, ...]:
+    """Cell-text signature of a row, used for header-repeat detection.
+
+    Per-cell text is stripped and case-folded; empty cells become empty
+    strings so signature comparison is order-sensitive and column-count-
+    sensitive without being whitespace- or case-fragile.
+    """
+    sig: list[str] = []
+    for tc in tr.findall(qn("w:tc")):
+        sig.append(_cell_plain_text(tc).casefold())
+    return tuple(sig)
+
+
+def _split_table_at_indices(
+    tbl: Any,
+    rows: list[Any],
+    split_indices: list[int],
+    body: Any,
+) -> int:
+    """Split ``tbl`` into sub-tables at the given row indices.
+
+    All XML around the table (``<w:tblPr>``, ``<w:tblGrid>``, etc.) is
+    deep-copied into each clone so the resulting sub-tables render
+    identically to slices of the original.
+
+    Returns the number of NEW tables introduced (i.e., ``len(split_indices)``).
+    """
+    from copy import deepcopy
+
+    # bracket the rows into segments: rows[0:split[0]], rows[split[0]:split[1]], ..., rows[split[-1]:]
+    boundaries = [0, *split_indices, len(rows)]
+    segments: list[list[Any]] = []
+    for i in range(len(boundaries) - 1):
+        seg = rows[boundaries[i]:boundaries[i + 1]]
+        if seg:
+            segments.append(seg)
+    if len(segments) <= 1:
+        return 0
+
+    # capture the original tbl's structural prelude (anything that isn't <w:tr>)
+    prelude: list[Any] = []
+    for child in list(tbl):
+        if child.tag == qn("w:tr"):
+            continue
+        prelude.append(child)
+
+    parent = tbl.getparent()
+    if parent is None:
+        return 0
+    insertion_index = list(parent).index(tbl)
+
+    # remove the original tbl from the parent so we can splice clones in
+    parent.remove(tbl)
+
+    introduced = 0
+    for seg_i, seg in enumerate(segments):
+        clone = OxmlElement("w:tbl")
+        for pre in prelude:
+            clone.append(deepcopy(pre))
+        for row in seg:
+            clone.append(deepcopy(row))
+        parent.insert(insertion_index + seg_i, clone)
+        if seg_i > 0:
+            introduced += 1
+    return introduced
