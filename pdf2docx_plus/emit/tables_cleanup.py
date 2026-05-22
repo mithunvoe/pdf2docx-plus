@@ -91,6 +91,9 @@ def unwrap_tiny_tables(
     """Convert tiny tables into tab-separated paragraphs.
 
     Tables are unwrapped when:
+      * the table has no real box borders (a bordered table is a
+        genuine lattice table from the source - e.g. an empty
+        form-field box - and must keep its cell structure), AND
       * rows <= max_rows, AND
       * every cell has <= max_cell_chars, AND
       * number of columns >= min_cols_to_unwrap.
@@ -98,6 +101,11 @@ def unwrap_tiny_tables(
     body = document.element.body
     unwrapped = 0
     for tbl in list(body.findall(qn("w:tbl"))):
+        # Borderless single-row tables are upstream's stream-detected
+        # label/value sprawl; bordered ones are real lattice tables
+        # (including blank form-field boxes) and must not be flattened.
+        if _has_box_borders(tbl):
+            continue
         rows = tbl.findall(qn("w:tr"))
         if len(rows) > max_rows:
             continue
@@ -220,17 +228,27 @@ def drop_empty_tables(document: Any, *, max_cells: int = 9) -> int:
 
     Upstream's lattice detector faithfully finds bordered rectangles in
     the source PDF. When a small rectangle encloses nothing - an
-    underline stroke, a decorative margin box, a single detection
-    artifact - the resulting table is pure noise and should be dropped.
+    underline stroke, a single detection artifact with no real
+    enclosing box - the resulting table is pure noise and should be
+    dropped.
 
-    Larger empty tables, however, are usually **legitimate form
-    grids** (e.g. the checkbox continuation rows on a multi-page
-    application form). Dropping those destroys the form: the user
-    loses the place where their ticks are supposed to go.
+    Two kinds of empty table are **kept** because they are intentional
+    structure, not noise:
 
-    Heuristic: only drop fully-empty tables with at most ``max_cells``
-    total cells (default 9 - a 3x3 grid). Anything larger is kept
-    even when empty.
+      * **Bordered form-field boxes.** A blank cell with a real box
+        border (>=2 visible sides) is an input field the applicant is
+        meant to write in - the Day/Month/Year date boxes and the
+        Flat/Room/Floor/Block address grids on the MPFA forms, the
+        tick boxes next to ``"(A) Authorized financial institution"``,
+        etc. Dropping these collapses the form's columns into run-on
+        label text outside any table. We therefore never drop an empty
+        table that carries box borders, regardless of its size.
+      * **Large empty grids.** Even when borderless, a fully-empty
+        table with more than ``max_cells`` cells (default 9 - a 3x3
+        grid) is almost certainly a checkbox continuation grid, so it
+        is preserved too.
+
+    Only small (<= ``max_cells``) borderless empty tables are dropped.
 
     Returns the number of tables removed.
     """
@@ -238,6 +256,9 @@ def drop_empty_tables(document: Any, *, max_cells: int = 9) -> int:
     removed = 0
     for tbl in list(body.findall(qn("w:tbl"))):
         if not _table_is_fully_empty(tbl):
+            continue
+        # A real bordered box is a form field, never noise - keep it.
+        if _has_box_borders(tbl):
             continue
         rows = tbl.findall(qn("w:tr"))
         n_cells = sum(len(r.findall(qn("w:tc"))) for r in rows)
@@ -284,6 +305,39 @@ def trim_empty_table_rows(document: Any) -> int:
 
 
 # -- helpers --------------------------------------------------------------
+
+# Cell / table border side tags that make up a visible box. ``left``/``right``
+# are the legacy aliases of ``start``/``end``; either spelling counts.
+_BORDER_SIDES = ("top", "bottom", "left", "right", "start", "end")
+
+
+def _count_border_sides(borders_el: Any) -> int:
+    """Number of visible (non-nil) border sides on a ``*Borders`` element."""
+    if borders_el is None:
+        return 0
+    count = 0
+    for side in _BORDER_SIDES:
+        edge = borders_el.find(qn("w:" + side))
+        if edge is not None and edge.get(qn("w:val")) not in (None, "nil", "none"):
+            count += 1
+    return count
+
+
+def _has_box_borders(tbl: Any) -> bool:
+    """True when the table draws a real enclosing box.
+
+    A genuine box has at least two visible sides somewhere - either at
+    the table level (``<w:tblBorders>``) or on any single cell
+    (``<w:tcBorders>``). A lone bottom stroke (one side) is treated as
+    an underline artifact, not a box, so it is *not* protected.
+    """
+    tblPr = tbl.find(qn("w:tblPr"))
+    if tblPr is not None and _count_border_sides(tblPr.find(qn("w:tblBorders"))) >= 2:
+        return True
+    for tcPr in tbl.iter(qn("w:tcPr")):
+        if _count_border_sides(tcPr.find(qn("w:tcBorders"))) >= 2:
+            return True
+    return False
 
 
 def _table_is_fully_empty(tbl: Any) -> bool:
@@ -396,7 +450,7 @@ def _split_table_at_indices(
     boundaries = [0, *split_indices, len(rows)]
     segments: list[list[Any]] = []
     for i in range(len(boundaries) - 1):
-        seg = rows[boundaries[i]:boundaries[i + 1]]
+        seg = rows[boundaries[i] : boundaries[i + 1]]
         if seg:
             segments.append(seg)
     if len(segments) <= 1:
