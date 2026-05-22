@@ -19,6 +19,7 @@ Passes:
 from __future__ import annotations
 
 from .checkbox_glyphs import canonicalise_checkbox_glyphs
+from .header_images import promote_header_images_to_section
 from .headers_footers import extract_headers_footers
 from .lists import apply_lists
 from .page_breaks import insert_page_breaks
@@ -58,6 +59,7 @@ __all__ = [
     "insert_page_breaks",
     "merge_consecutive_single_row_tables",
     "normalize_multi_column_sections",
+    "promote_header_images_to_section",
     "promote_page_numbers_to_footer",
     "repair_wrap_spacing",
     "split_visually_separated_tables",

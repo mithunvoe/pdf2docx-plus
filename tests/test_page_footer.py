@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -30,6 +31,19 @@ promote_page_numbers_to_footer = _MOD.promote_page_numbers_to_footer
 
 def _add_body_paragraph(doc, text: str) -> None:
     doc.add_paragraph(text)
+
+
+def _append_sect_break(doc) -> None:
+    """Insert a section-break paragraph before the final body sectPr."""
+    body = doc.element.body
+    final_sect = body.find(qn("w:sectPr"))
+    p = OxmlElement("w:p")
+    pPr = OxmlElement("w:pPr")
+    sectPr = OxmlElement("w:sectPr")
+    pPr.append(sectPr)
+    p.append(pPr)
+    assert final_sect is not None
+    final_sect.addprevious(p)
 
 
 @pytest.mark.unit
@@ -166,3 +180,69 @@ def test_sparse_page_run_ignored_when_mixed_with_data() -> None:
         _add_body_paragraph(doc, v)
     promoted = promote_page_numbers_to_footer(doc)
     assert promoted == 0
+
+
+# -- per-section trailing page numbers (decorated / short sequences) -------
+
+
+def _build_per_section_trailing(values: list[str]) -> "Document":
+    """One section per value; each section ends with a page-number line."""
+    doc = Document()
+    for i, v in enumerate(values):
+        _add_body_paragraph(doc, f"real body content for page {i}")
+        _add_body_paragraph(doc, v)
+        if i < len(values) - 1:
+            _append_sect_break(doc)
+    return doc
+
+
+@pytest.mark.unit
+def test_strips_decorated_trailing_page_numbers() -> None:
+    """``– 2 –`` style page numbers, one per section, are recognised even
+    though they are neither bare digits nor a 'Last update' line."""
+    doc = _build_per_section_trailing(["– 2 –", "– 3 –", "– 4 –"])
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 3
+    body = [p.text for p in doc.paragraphs]
+    assert not any("2" in t or "3" in t or "4" in t for t in body if "page" not in t)
+    assert all(f"real body content for page {i}" in body for i in range(3))
+
+
+@pytest.mark.unit
+def test_strips_short_per_section_bare_sequence() -> None:
+    """A 3-page doc with one bare page number per section is below the
+    bare-sequence floor of 5 but is still recognised per-section."""
+    doc = _build_per_section_trailing(["1", "2", "3"])
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 3
+    body = [p.text for p in doc.paragraphs]
+    assert "1" not in body and "2" not in body and "3" not in body
+
+
+@pytest.mark.unit
+def test_strips_bracketed_and_word_page_numbers() -> None:
+    doc = _build_per_section_trailing(["[2]", "Page 3", "4 of 10"])
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 3
+
+
+@pytest.mark.unit
+def test_keeps_non_monotonic_trailing_numbers() -> None:
+    """Trailing numbers that do not increase like page numbers are data,
+    not pagination — leave them alone."""
+    doc = _build_per_section_trailing(["7", "2", "9"])
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 0
+    body = [p.text for p in doc.paragraphs]
+    assert "7" in body and "2" in body and "9" in body
+
+
+@pytest.mark.unit
+def test_keeps_single_trailing_number() -> None:
+    """One section ending in a number is not enough evidence."""
+    doc = Document()
+    _add_body_paragraph(doc, "body")
+    _add_body_paragraph(doc, "5")
+    promoted = promote_page_numbers_to_footer(doc)
+    assert promoted == 0
+    assert any(p.text == "5" for p in doc.paragraphs)

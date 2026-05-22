@@ -43,6 +43,19 @@ from docx.oxml.ns import qn
 
 _FOOTER_LINE = re.compile(r"^\s*(?:(\d+)\s+)?Last update:\s*(.+?)\s*$")
 _DIGIT_ONLY = re.compile(r"^\s*\d{1,4}\s*$")
+# Decorated / word page numbers that upstream emits as a lone trailing
+# paragraph: "2", "- 2 -", "[2]", "(2)", "Page 2", "2 of 10", "2 / 10",
+# "Page 2 of 10", and the same wrapped in en/em/figure dashes. Group 1
+# is the page number itself. Dash class uses escapes (hyphen-minus plus
+# U+2010..U+2015) to keep the source ASCII-clean.
+_DASHES = "\\-\u2010\u2011\u2012\u2013\u2014\u2015"
+_DECORATED_PAGE = re.compile(
+    r"^\s*(?:page\s+)?[\[\(]?\s*[" + _DASHES + r"]*\s*"
+    r"(\d{1,4})"
+    r"\s*[" + _DASHES + r"]*\s*[\]\)]?\s*"
+    r"(?:(?:of|/)\s*\d{1,4})?\s*$",
+    re.IGNORECASE,
+)
 
 
 def promote_page_numbers_to_footer(document: Any) -> int:
@@ -123,12 +136,23 @@ def promote_page_numbers_to_footer(document: Any) -> int:
         # Path 2: detect a global bare-digit page-number sequence.
         all_paragraphs = [p for bucket in section_buckets for p in bucket]
         bare_sequence = _find_bare_page_number_sequence(all_paragraphs)
-        if not bare_sequence:
-            return 0
+
+    # Path 3: per-section trailing decorated / short page numbers. Catches
+    # short documents and decorated forms ("- 2 -", "[3]", "Page 4") that
+    # paths 1 and 2 miss. Additive: merges into the removal set below.
+    trailing_page_numbers = _find_trailing_page_numbers(section_buckets)
+
+    if not section_footer_text and not bare_sequence and not trailing_page_numbers:
+        return 0
 
     removed = 0
     # remove footer + digit paragraphs from the body
-    to_remove = list(matched_footer_paragraphs) + list(matched_digit_paragraphs) + list(bare_sequence)
+    to_remove = (
+        list(matched_footer_paragraphs)
+        + list(matched_digit_paragraphs)
+        + list(bare_sequence)
+        + list(trailing_page_numbers)
+    )
     seen: set[int] = set()
     for p in to_remove:
         if id(p) in seen:
@@ -166,6 +190,48 @@ def promote_page_numbers_to_footer(document: Any) -> int:
                 prev_text = text
 
     return removed
+
+
+def _find_trailing_page_numbers(section_buckets: list[list[Any]]) -> list[Any]:
+    """Return the trailing page-number paragraphs across sections.
+
+    Looks at the **last** non-empty paragraph of each section bucket. If
+    it matches a decorated/bare page-number form, it is a candidate.
+    The candidates are accepted as pagination (rather than data) only
+    when, across at least two sections, their values increase
+    monotonically with small gaps and stay bounded by the section
+    count — exactly how page numbers behave and table data does not.
+
+    Returns the paragraphs to strip, in document order. Empty when the
+    trailing numbers do not look like pagination.
+    """
+    candidates: list[tuple[Any, int]] = []
+    for bucket in section_buckets:
+        last_p = None
+        for p in bucket:
+            if _plain_text(p):
+                last_p = p
+        if last_p is None:
+            continue
+        m = _DECORATED_PAGE.match(_plain_text(last_p))
+        if not m:
+            continue
+        try:
+            candidates.append((last_p, int(m.group(1))))
+        except ValueError:  # pragma: no cover
+            continue
+
+    if len(candidates) < 2:
+        return []
+
+    values = [v for _, v in candidates]
+    for a, b in zip(values, values[1:]):
+        if b <= a or b - a > 3:
+            return []
+    # page numbers track the page/section count; reject large data values
+    if max(values) > len(section_buckets) + 5:
+        return []
+    return [p for p, _ in candidates]
 
 
 def _find_bare_page_number_sequence(paragraphs: list[Any]) -> list[Any]:
