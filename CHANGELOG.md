@@ -2,7 +2,35 @@
 
 ## Unreleased
 
+### Added
+
+- **Repeating letterhead images are promoted to the section header.**
+  New post-emit pass ``emit.header_images.promote_header_images_to_section``
+  (enabled via ``convert(..., promote_header_images=True)``, reported as
+  ``ConversionResult.header_images_promoted``). Upstream re-emits the
+  per-page logo as an inline or floating ``wp:anchor`` drawing in the
+  body of every source-PDF section. A floating one overlaps the first
+  body line, and a section whose only content is the logo plus a page
+  number renders as a near-blank page. The pass identifies the
+  letterhead by image-content repetition across sections (only a lone
+  image at the top of a section qualifies, so one-off figures stay in
+  place), lifts a single copy into the section ``w:hdr`` scaled to a
+  header band, and reserves matching top-margin space so the body
+  clears it. Emptied chrome sections then collapse, removing phantom
+  pages. Covered by ``tests/test_header_images.py``.
+
 ### Fixed
+
+- **Static / decorated page numbers left phantom near-blank pages.**
+  ``emit.page_footer`` now recognises decorated and short trailing page
+  numbers (``- 2 -``, ``[3]``, ``Page 4``, ``5 of 10``, and bare digits)
+  per section, not just ``"N Last update: ..."`` lines and >=5-long bare
+  sequences. ``emit.headers_footers`` now defers ``Last update`` footer
+  lines to the page-footer pass so the page number becomes a live
+  ``PAGE`` field instead of a digit frozen at "1" on every page.
+  Together these eliminate the chrome-only blank pages and fix the
+  per-page page numbering. Covered by ``tests/test_page_footer.py`` and
+  ``tests/test_header_footer_defer.py``.
 
 - **Cross-page row coalescing silently dropped continuation content.**
   ``stitch._coalesce_row`` transferred the source cell's text into the
