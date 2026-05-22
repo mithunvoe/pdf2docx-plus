@@ -36,6 +36,10 @@ from typing import Any
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+# python-docx's ``qn`` does not register the legacy VML namespace, so build
+# the Clark-notation tag for ``<v:imagedata>`` directly.
+_VML_IMAGEDATA = "{urn:schemas-microsoft-com:vml}imagedata"
+
 
 def normalize_multi_column_sections(document: Any) -> int:
     """Convert every `w:cols w:num` > 1 to 1. Returns count normalized."""
@@ -142,9 +146,7 @@ def flatten_per_page_sections(document: Any) -> int:
     for sp in sect_prs:
         sz = sp.find(qn("w:pgSz"))
         if sz is not None:
-            pg_sizes.add(
-                (sz.get(qn("w:w")), sz.get(qn("w:h")), sz.get(qn("w:orient")))
-            )
+            pg_sizes.add((sz.get(qn("w:w")), sz.get(qn("w:h")), sz.get(qn("w:orient"))))
     if len(pg_sizes) > 1:
         return 0
     converted = 0
@@ -190,9 +192,13 @@ def collapse_empty_sections(document: Any) -> int:
 
     "Meaningful content" means: any ``<w:t>`` with non-whitespace
     text, any ``<w:tbl>``, OR more than one drawing / pict / object
-    embedding.  A single drawing without any accompanying text is
-    treated as decorative chrome (the page-header logo) and
-    collapsing it is preferred.
+    embedding.  A single drawing is collapsed **only when its image
+    survives elsewhere** - in a header/footer or in another retained
+    section - or when it carries no resolvable image at all (an empty
+    or broken drawing that renders nothing).  A lone drawing that is
+    the only remaining copy of a real image is kept: dropping it would
+    delete the picture entirely, which is what happened to cover-page
+    logos (e.g. KFS) that were never promoted to a header.
 
     Returns the number of empty sections collapsed.
     """
@@ -203,16 +209,37 @@ def collapse_empty_sections(document: Any) -> int:
     buckets: list[list[Any]] = [[]]
     for child in children:
         buckets[-1].append(child)
-        if child.tag == qn("w:p"):
-            if child.find(qn("w:pPr") + "/" + qn("w:sectPr")) is not None:
-                buckets.append([])
+        if child.tag == qn("w:p") and child.find(qn("w:pPr") + "/" + qn("w:sectPr")) is not None:
+            buckets.append([])
     # final bucket uses body-level sectPr - leave it alone
     if buckets and not buckets[-1]:
         buckets.pop()
     if len(buckets) <= 1:
         return 0
+
+    try:
+        body_rels = document.part.rels
+    except Exception:
+        body_rels = {}
+    # Images we are allowed to drop a copy of, because the picture survives
+    # somewhere else: any header/footer image, plus any image inside a
+    # bucket that has real content and is therefore never collapsed.
+    preserved = _header_footer_image_targets(document)
+    for bucket in buckets:
+        if _bucket_has_content(bucket):
+            preserved |= _bucket_image_targets(bucket, body_rels)
+
+    kept_single: set[str] = set()
     for bucket in buckets[:-1]:
         if _bucket_has_content(bucket):
+            continue
+        targets = _bucket_image_targets(bucket, body_rels)
+        # Keep a lone drawing only when it is the sole surviving copy of a
+        # real image (not in a header and not in any retained section, and
+        # not already kept once). Everything else - decorative repeats,
+        # empty/broken drawings, truly blank stubs - is collapsed.
+        if targets and not targets <= (preserved | kept_single):
+            kept_single |= targets
             continue
         for el in bucket:
             parent = el.getparent()
@@ -237,15 +264,73 @@ def _bucket_has_content(bucket: list[Any]) -> bool:
         if has_text:
             break
         for tag in ("w:drawing", "w:pict", "w:object"):
-            for d in el.iter(qn(tag)):
+            for _ in el.iter(qn(tag)):
                 drawing_count += 1
                 if drawing_count > 1:
                     return True
-    if has_table or has_text:
-        return True
-    # Exactly one drawing and nothing else: treat as decorative
-    # chrome (the per-page header logo). Collapse the section.
-    return False
+    # Exactly one drawing (or none) and nothing else is not "real" content;
+    # the caller decides whether to collapse based on image identity.
+    return has_table or has_text
+
+
+def _bucket_image_targets(bucket: list[Any], rels: Any) -> set[str]:
+    """Resolvable media partnames for every image referenced in the bucket."""
+    targets: set[str] = set()
+    for el in bucket:
+        targets |= _drawing_targets(el, rels)
+    return targets
+
+
+def _drawing_targets(element: Any, rels: Any) -> set[str]:
+    """Media partnames referenced by DrawingML / VML images in ``element``.
+
+    Only relationships that resolve to an internal image part are
+    returned; external links and dangling ids are ignored.
+    """
+    targets: set[str] = set()
+    for blip in element.iter(qn("a:blip")):
+        for attr in (qn("r:embed"), qn("r:link")):
+            t = _rid_to_partname(rels, blip.get(attr))
+            if t:
+                targets.add(t)
+    for img in element.iter(_VML_IMAGEDATA):
+        t = _rid_to_partname(rels, img.get(qn("r:id")))
+        if t:
+            targets.add(t)
+    return targets
+
+
+def _rid_to_partname(rels: Any, rid: str | None) -> str | None:
+    if not rid:
+        return None
+    try:
+        rel = rels[rid]
+        if rel.is_external:
+            return None
+        return str(rel.target_part.partname)
+    except Exception:
+        return None
+
+
+def _header_footer_image_targets(document: Any) -> set[str]:
+    """Media partnames referenced by every header / footer part."""
+    targets: set[str] = set()
+    try:
+        rels = document.part.rels
+    except Exception:
+        return targets
+    for rel in list(rels.values()):
+        try:
+            if rel.is_external:
+                continue
+            reltype = rel.reltype or ""
+            if not (reltype.endswith("/header") or reltype.endswith("/footer")):
+                continue
+            part = rel.target_part
+            targets |= _drawing_targets(part.element, part.rels)
+        except Exception:
+            continue
+    return targets
 
 
 def consolidate_identical_sections(document: Any) -> int:
@@ -286,8 +371,7 @@ def consolidate_identical_sections(document: Any) -> int:
     # mid-document ones — stripping the body-level sectPr would orphan
     # the document trailer.
     mid_doc = [
-        sp for sp in sect_prs
-        if sp.getparent() is not None and sp.getparent().tag == qn("w:pPr")
+        sp for sp in sect_prs if sp.getparent() is not None and sp.getparent().tag == qn("w:pPr")
     ]
     if not mid_doc:
         return 0
@@ -326,6 +410,7 @@ def _section_signature(sect_pr: Any) -> tuple:
     rendering.  Two sectPrs with equal signatures are functionally
     interchangeable.
     """
+
     def _attrs(tag_name: str, attr_names: tuple[str, ...]) -> tuple:
         el = sect_pr.find(qn(tag_name))
         if el is None:
@@ -343,9 +428,7 @@ def _section_signature(sect_pr: Any) -> tuple:
     refs: list[tuple[str, str]] = []
     for tag in ("w:headerReference", "w:footerReference"):
         for r in sect_pr.findall(qn(tag)):
-            refs.append(
-                (tag, r.get(qn("w:type")) or "", r.get(qn("r:id")) or "")
-            )
+            refs.append((tag, r.get(qn("w:type")) or "", r.get(qn("r:id")) or ""))
     return (pg_sz, pg_mar, cols, pg_num, tuple(sorted(refs)))
 
 

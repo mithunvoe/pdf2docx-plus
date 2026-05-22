@@ -10,19 +10,20 @@ has no visible content, merging them into the next section.
 from __future__ import annotations
 
 import importlib.util
+import io
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
 from docx import Document  # type: ignore
+from docx.opc.constants import RELATIONSHIP_TYPE as RT  # type: ignore
 from docx.oxml import OxmlElement  # type: ignore
 from docx.oxml.ns import qn  # type: ignore
 
 _SPEC = importlib.util.spec_from_file_location(
     "_sections_under_test",
-    Path(__file__).resolve().parent.parent
-    / "pdf2docx_plus"
-    / "emit"
-    / "sections.py",
+    Path(__file__).resolve().parent.parent / "pdf2docx_plus" / "emit" / "sections.py",
 )
 assert _SPEC and _SPEC.loader
 _MOD = importlib.util.module_from_spec(_SPEC)
@@ -225,3 +226,75 @@ def test_preserves_section_with_multiple_drawings() -> None:
     doc.add_paragraph("body")
     collapsed = collapse_empty_sections(doc)
     assert collapsed == 0
+
+
+def _png_1x1() -> bytes:
+    """A minimal valid 1x1 RGB PNG so python-docx accepts the image."""
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return (
+            struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    idat = zlib.compress(b"\x00\xff\x00\x00")
+    return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+
+def _split_off_drawing_section(doc) -> None:
+    """Turn the document's trailing picture paragraph into its own section
+    by inserting a sectPr-break paragraph after it, then add a real body
+    section so there is something to (potentially) collapse into."""
+    body = doc.element.body
+    final_sect = body.find(qn("w:sectPr"))
+    p_sect = OxmlElement("w:p")
+    pPr = OxmlElement("w:pPr")
+    pPr.append(OxmlElement("w:sectPr"))
+    p_sect.append(pPr)
+    final_sect.addprevious(p_sect)
+    doc.add_paragraph("real content")
+
+
+@pytest.mark.unit
+def test_keeps_drawing_only_section_when_image_is_sole_copy() -> None:
+    """A lone drawing that is the *only* copy of a real image must be
+    kept - collapsing it would delete the picture entirely (the cover-logo
+    regression on KFS-style documents)."""
+    doc = Document()
+    doc.add_picture(io.BytesIO(_png_1x1()))  # picture lands in its own paragraph
+    _split_off_drawing_section(doc)
+    before = len(list(doc.element.body.iter(qn("a:blip"))))
+    collapsed = collapse_empty_sections(doc)
+    after = len(list(doc.element.body.iter(qn("a:blip"))))
+    assert before == 1
+    assert collapsed == 0
+    assert after == 1  # the image survives in the body
+
+
+@pytest.mark.unit
+def test_collapses_drawing_only_section_when_image_lives_in_header() -> None:
+    """A lone drawing whose image also appears in a header is a redundant
+    per-page logo copy and is collapsed - the header keeps the picture."""
+    doc = Document()
+    doc.add_picture(io.BytesIO(_png_1x1()))
+    body = doc.element.body
+    rid = next(iter(body.iter(qn("a:blip")))).get(qn("r:embed"))
+    image_part = doc.part.rels[rid].target_part
+
+    # relate the SAME image part into the section header and reference it
+    header = doc.sections[0].header
+    header.is_linked_to_previous = False
+    hrid = header.part.relate_to(image_part, RT.IMAGE)
+    run = header.paragraphs[0].add_run()
+    drawing = OxmlElement("w:drawing")
+    blip = OxmlElement("a:blip")
+    blip.set(qn("r:embed"), hrid)
+    drawing.append(blip)
+    run._r.append(drawing)
+
+    _split_off_drawing_section(doc)
+    collapsed = collapse_empty_sections(doc)
+    assert collapsed == 1
+    assert len(list(doc.element.body.iter(qn("a:blip")))) == 0

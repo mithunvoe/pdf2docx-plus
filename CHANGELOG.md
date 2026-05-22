@@ -21,6 +21,39 @@
 
 ### Fixed
 
+- **Word-separator spaces dropped at span restore produced word-glue.**
+  PyMuPDF's ``rawdict`` extraction sometimes splits a visual line so a
+  run of whitespace becomes its own span - e.g. the heading
+  ``"A. Introduction"`` arrives as the three spans
+  ``["A.", " ", "Introduction"]`` and a numbered marker arrives as
+  ``["1.", " ", "Pursuant ..."]``. Upstream
+  ``pdf2docx.text.Spans.restore`` discards *every* whitespace-only,
+  style-less span, which is correct for redundant leading / trailing
+  indentation but glues interior word separators, emitting
+  ``"A.Introduction"``, ``"1.Pursuant"``, ``"scheme.This"`` and similar.
+  New patch ``fidelity.spans`` keeps a whitespace span only when it is
+  flanked by visible content on both sides; it never invents a space, so
+  ``"U.S."``, decimals, and run-on identifiers are untouched. On the
+  voedocx corpus this removed 42 word-glue occurrences across 6
+  documents (the residual cases are faithful to source PDFs that encode
+  the glyphs with no separating space). Covered by
+  ``tests/test_span_spacing.py``.
+
+- **Cover-page logos were deleted entirely as "decorative chrome".**
+  ``emit.collapse_empty_sections`` treated any section whose only content
+  was a single drawing as a redundant per-page logo and removed it,
+  assuming a copy had already been promoted to a header. When promotion
+  did not fire (a logo that appears once, e.g. the KFS Bosera and SFC
+  cover letterheads), this dropped the *only* copy of the image - the
+  drawing vanished from the body while the picture lingered orphaned in
+  ``word/media`` referenced by nothing, so it rendered nowhere. The pass
+  now resolves each lone drawing to its media part and collapses it only
+  when the same image survives elsewhere (in a header/footer or another
+  retained section) or carries no resolvable image at all; a sole
+  surviving copy is kept in place. On the voedocx corpus this recovered
+  6 lost logos across 6 documents with no orphaned media remaining.
+  Covered by ``tests/test_empty_sections.py``.
+
 - **Static / decorated page numbers left phantom near-blank pages.**
   ``emit.page_footer`` now recognises decorated and short trailing page
   numbers (``- 2 -``, ``[3]``, ``Page 4``, ``5 of 10``, and bare digits)
