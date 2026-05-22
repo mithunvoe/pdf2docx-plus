@@ -21,6 +21,25 @@
 
 ### Fixed
 
+- **Empty form-field boxes were deleted, collapsing form columns.**
+  ``emit.drop_empty_tables`` removed every fully-empty table with <= 9
+  cells, and ``emit.unwrap_tiny_tables`` flattened single-row tables to
+  tab text. On application forms (e.g. the MPFA ``list_cf`` Constituent
+  Fund checklist) the blank input grids are exactly that shape - the
+  Day/Month/Year date boxes, the Flat/Room/Floor/Block address grids,
+  and the single tick boxes next to ``"(A) Authorized financial
+  institution"``. Dropping them destroyed the form: columns vanished and
+  the labels collapsed into run-on text outside any table. Both passes
+  are now **border-aware**: a table that draws a real enclosing box
+  (>= 2 visible border sides on a cell or at table level) is treated as
+  a genuine lattice table and is never dropped or unwrapped, regardless
+  of size or emptiness. Borderless stream-detected sprawl and small
+  borderless empties are still cleaned up as before. Across the corpus
+  this preserved 41 previously-deleted form boxes (32 in ``list_cf``,
+  3 + 3 in the UT checklists, 1 each in the KFS factsheets) with no
+  change to genuine data tables. Covered by
+  ``tests/test_tables_cleanup.py``.
+
 - **Word-separator spaces dropped at span restore produced word-glue.**
   PyMuPDF's ``rawdict`` extraction sometimes splits a visual line so a
   run of whitespace becomes its own span - e.g. the heading

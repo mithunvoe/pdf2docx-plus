@@ -13,21 +13,21 @@ from pathlib import Path
 
 import pytest
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 # Import the module directly to avoid the pdf2docx_plus package __init__,
 # which pulls in `fitz` (not needed for these pure-XML cleanup passes).
 _SPEC = importlib.util.spec_from_file_location(
     "_tables_cleanup_under_test",
-    Path(__file__).resolve().parent.parent
-    / "pdf2docx_plus"
-    / "emit"
-    / "tables_cleanup.py",
+    Path(__file__).resolve().parent.parent / "pdf2docx_plus" / "emit" / "tables_cleanup.py",
 )
 assert _SPEC and _SPEC.loader
 _MOD = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MOD)
 drop_empty_tables = _MOD.drop_empty_tables
 trim_empty_table_rows = _MOD.trim_empty_table_rows
+unwrap_tiny_tables = _MOD.unwrap_tiny_tables
 
 
 def _make_doc_with_tables(specs: list[list[list[str]]]):
@@ -41,6 +41,24 @@ def _make_doc_with_tables(specs: list[list[list[str]]]):
             for ci, text in enumerate(row):
                 tbl.cell(ri, ci).text = text
     return doc
+
+
+def _add_box_borders(table) -> None:
+    """Give every cell inline box borders (start/end/bottom), matching the
+    way the upstream lattice emitter draws form-field boxes."""
+    for tc in table._tbl.iter(qn("w:tc")):
+        tcPr = tc.find(qn("w:tcPr"))
+        if tcPr is None:
+            tcPr = OxmlElement("w:tcPr")
+            tc.insert(0, tcPr)
+        borders = OxmlElement("w:tcBorders")
+        for side in ("start", "end", "bottom"):
+            edge = OxmlElement("w:" + side)
+            edge.set(qn("w:val"), "single")
+            edge.set(qn("w:sz"), "6")
+            edge.set(qn("w:color"), "000000")
+            borders.append(edge)
+        tcPr.append(borders)
 
 
 @pytest.mark.unit
@@ -86,6 +104,49 @@ def test_drop_empty_tables_preserves_large_empty_form_grids() -> None:
 
 
 @pytest.mark.unit
+def test_drop_empty_tables_keeps_bordered_form_box() -> None:
+    """A small empty table with real box borders is a form-field grid
+    (e.g. the Day/Month/Year or Flat/Room address boxes) and must be
+    kept even though it is empty and under the cell-count cap."""
+    doc = _make_doc_with_tables([[["", "", "", ""]]])  # 1x4 empty
+    _add_box_borders(doc.tables[0])
+    removed = drop_empty_tables(doc)
+    assert removed == 0
+    assert len(doc.tables) == 1
+
+
+@pytest.mark.unit
+def test_drop_empty_tables_keeps_bordered_single_box() -> None:
+    """Even a 1x1 empty bordered box is a tick / input field, not noise."""
+    doc = _make_doc_with_tables([[[""]]])
+    _add_box_borders(doc.tables[0])
+    removed = drop_empty_tables(doc)
+    assert removed == 0
+    assert len(doc.tables) == 1
+
+
+@pytest.mark.unit
+def test_unwrap_tiny_tables_skips_bordered_table() -> None:
+    """A bordered single-row table is a genuine lattice table and must
+    keep its cell structure rather than being flattened to tab text."""
+    doc = _make_doc_with_tables([[["a", "b"]]])
+    _add_box_borders(doc.tables[0])
+    unwrapped = unwrap_tiny_tables(doc)
+    assert unwrapped == 0
+    assert len(doc.tables) == 1
+
+
+@pytest.mark.unit
+def test_unwrap_tiny_tables_unwraps_borderless_sprawl() -> None:
+    """A borderless single-row table is upstream's stream-detected
+    label/value sprawl and is still unwrapped to paragraphs."""
+    doc = _make_doc_with_tables([[["a", "b"]]])
+    unwrapped = unwrap_tiny_tables(doc)
+    assert unwrapped == 1
+    assert len(doc.tables) == 0
+
+
+@pytest.mark.unit
 def test_trim_empty_table_rows_trims_sparse_lattice_artifact() -> None:
     """Lattice detector often finds a rectangle around a single piece
     of text plus a few spurious empty cells. The 4-row case with one
@@ -124,8 +185,6 @@ def test_trim_empty_table_rows_preserves_form_checkbox_tables() -> None:
 @pytest.mark.unit
 def test_trim_empty_table_rows_preserves_multi_content_tables() -> None:
     """A 5-row table with two content rows is a real table; no trimming."""
-    doc = _make_doc_with_tables(
-        [[["", ""], ["row1", "a"], ["", ""], ["row2", "b"], ["", ""]]]
-    )
+    doc = _make_doc_with_tables([[["", ""], ["row1", "a"], ["", ""], ["row2", "b"], ["", ""]]])
     trimmed = trim_empty_table_rows(doc)
     assert trimmed == 0
