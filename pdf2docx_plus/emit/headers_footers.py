@@ -40,10 +40,19 @@ from ..layout.hf_detect import HeaderFooter
 
 _PAGE_NUM = re.compile(r"(?:page\s*)?\d+(?:\s*/\s*\d+)?", re.IGNORECASE)
 _WS = re.compile(r"\s+")
+# Footer lines that embed a page number ("N Last update: <date>") are
+# deferred to ``promote_page_numbers_to_footer`` so the page number
+# becomes a live ``PAGE`` field instead of a static digit copied onto
+# every page. Extracting them here would freeze "1" on all pages.
+_DEFERRED_TO_PAGE_FOOTER = re.compile(r"last\s*update", re.IGNORECASE)
 
 
 def _norm(text: str) -> str:
     return _WS.sub(" ", _PAGE_NUM.sub("#", text)).strip()
+
+
+def _is_deferred_footer(text: str) -> bool:
+    return bool(_DEFERRED_TO_PAGE_FOOTER.search(text))
 
 
 def extract_headers_footers(doc: Any, detected: list[HeaderFooter]) -> int:
@@ -67,7 +76,13 @@ def extract_headers_footers(doc: Any, detected: list[HeaderFooter]) -> int:
         return 0
 
     headers = [h for h in detected if h.is_header and _is_meaningful(h.text)]
-    footers = [h for h in detected if not h.is_header and _is_meaningful(h.text)]
+    footers = [
+        h
+        for h in detected
+        if not h.is_header
+        and _is_meaningful(h.text)
+        and not _is_deferred_footer(h.text)
+    ]
     header_texts = {_norm(h.text) for h in headers}
     footer_texts = {_norm(h.text) for h in footers}
     if not header_texts and not footer_texts:
