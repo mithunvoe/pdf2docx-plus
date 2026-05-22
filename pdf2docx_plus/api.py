@@ -48,6 +48,7 @@ from .emit import (
     insert_page_breaks,
     merge_consecutive_single_row_tables,
     normalize_multi_column_sections,
+    promote_header_images_to_section,
     promote_page_numbers_to_footer,
     repair_wrap_spacing,
     split_visually_separated_tables,
@@ -128,6 +129,7 @@ class ConversionResult:
     tables_split_visually_separated: int = 0
     sections_consolidated: int = 0
     checkbox_glyphs_canonicalised: int = 0
+    header_images_promoted: int = 0
     tblgrids_aligned: int = 0
     missing_rasters_recovered: int = 0
     vector_regions_rasterized: int = 0
@@ -230,6 +232,7 @@ class Converter:
         cleanup_tiny_tables: bool = True,
         fit_wide_tables: bool = True,
         promote_page_footer: bool = True,
+        promote_header_images: bool = True,
         repair_soft_wrap_spacing: bool = True,
         collapse_empty_sects: bool = True,
         explicit_page_breaks: bool = False,
@@ -321,6 +324,20 @@ class Converter:
                 page numbers never update when Word repaginates and
                 the orphan digits fall onto their own near-blank
                 pages, inflating the rendered page count.
+            promote_header_images: move the repeating per-page
+                letterhead/logo image out of the body and into the
+                section ``w:hdr``. Default True. Upstream re-emits the
+                page-top logo as an inline (or floating ``wp:anchor``)
+                drawing on every source page; a floating one overlaps
+                the first body line, and a logo-plus-page-number
+                section renders as a near-blank page. The pass detects
+                the letterhead by image-content repetition across
+                sections (only a lone image at the top of a section
+                qualifies — a one-off figure is left in place), lifts
+                one copy into the header scaled to a header band, and
+                reserves matching top-margin space so the body clears
+                it. ``ConversionResult`` reports
+                ``header_images_promoted``.
             flatten_sections: convert per-page `nextPage` section
                 breaks to `continuous` so Word repaginates naturally.
                 **Default False** — preserves the source PDF's
@@ -402,6 +419,7 @@ class Converter:
             "cleanup_tiny_tables": cleanup_tiny_tables,
             "fit_wide_tables": fit_wide_tables,
             "promote_page_footer": promote_page_footer,
+            "promote_header_images": promote_header_images,
             "repair_soft_wrap_spacing": repair_soft_wrap_spacing,
             "collapse_empty_sects": collapse_empty_sects,
             "explicit_page_breaks": explicit_page_breaks,
@@ -646,6 +664,14 @@ class Converter:
                             dirty = True
                     except Exception as e:
                         _log.debug("extract_headers_footers skipped: %s", e)
+                if pp.get("promote_header_images"):
+                    try:
+                        promoted_imgs = promote_header_images_to_section(doc)
+                        if promoted_imgs:
+                            dirty = True
+                            result.header_images_promoted = promoted_imgs
+                    except Exception as e:
+                        _log.debug("header-image promotion skipped: %s", e)
                 if pp.get("repair_soft_wrap_spacing"):
                     try:
                         repaired = repair_wrap_spacing(doc)
