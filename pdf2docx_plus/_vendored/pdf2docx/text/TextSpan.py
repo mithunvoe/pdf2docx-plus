@@ -400,7 +400,12 @@ class TextSpan(Element):
         # bit 2: serifed (2^2)
         # bit 3: monospaced (2^3)
         # bit 4: bold (2^4)
-        docx_run.superscript = bool(self.flags & 2**0)
+        # NOTE: Run exposes `bold`/`italic` convenience properties but NOT
+        # `superscript` — that lives on Run.font. Assigning the bare
+        # attribute silently created a dead instance attribute and emitted
+        # no <w:vertAlign>, so footnote markers rendered as baseline digits
+        # (Issue F4).
+        docx_run.font.superscript = bool(self.flags & 2**0)
         docx_run.italic = bool(self.flags & 2**1)
         docx_run.bold = bool(self.flags & 2**4)
 

@@ -40,7 +40,7 @@ Page elements structure:
 '''
 
 from docx.shared import Pt
-from docx.enum.section import WD_SECTION
+from docx.enum.section import WD_SECTION, WD_ORIENT
 from ..common.Collection import BaseCollection
 from ..common.share import debug_plot
 from .BasePage import BasePage
@@ -190,6 +190,14 @@ class Page(BasePage):
         # page size
         section.page_width  = Pt(self.width)
         section.page_height = Pt(self.height)
+
+        # page orientation (Issue C2): emit w:orient explicitly so MS Word
+        # (which keys off the attribute, not w>h) renders landscape pages
+        # correctly. The setter only sets the attribute; it does not swap
+        # the width/height we just assigned.
+        section.orientation = (
+            WD_ORIENT.LANDSCAPE if self.width > self.height else WD_ORIENT.PORTRAIT
+        )
 
         # page margin
         left,right,top,bottom = self.margin

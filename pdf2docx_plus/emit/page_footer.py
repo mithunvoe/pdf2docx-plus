@@ -189,6 +189,27 @@ def promote_page_numbers_to_footer(document: Any) -> int:
                 _write_footer(section, text)
                 prev_text = text
 
+    # Issue D2: Paths 2/3 detected bare / decorated page numbers and
+    # stripped them from the body but never installed a replacement, so
+    # the page numbering silently vanished. Install a right-aligned
+    # auto-updating PAGE field on every section Path 1 did not already
+    # handle (linking consecutive sections to avoid footer-part bloat).
+    if bare_sequence or trailing_page_numbers:
+        path1_sections = set(section_footer_text.keys())
+        chain_open = False
+        for idx, section in enumerate(sections):
+            if idx in path1_sections:
+                chain_open = False  # don't link across a Path-1 footer
+                continue
+            if not chain_open:
+                _write_footer(section, "")
+                chain_open = True
+            else:
+                try:
+                    section.footer.is_linked_to_previous = True
+                except Exception:
+                    _write_footer(section, "")
+
     return removed
 
 

@@ -145,8 +145,11 @@ def set_char_scaling(p_run, scale:float=1.0):
         p_run (docx.text.run.Run): Proxy object wrapping <w:r> element.
         scale (float, optional): scaling factor. Defaults to 1.0.
     '''
-    p_run._r.get_or_add_rPr().insert(0, 
-        parse_xml(r'<w:w {} w:val="{}"/>'.format(nsdecls('w'), 100*scale)))
+    # OOXML ST_TextScale requires an INTEGER percent; a raw float such as
+    # "96.66666984558105" is schema-invalid and can trip MS Word's
+    # "unreadable content" recovery (Issue F5).
+    p_run._r.get_or_add_rPr().insert(0,
+        parse_xml(r'<w:w {} w:val="{}"/>'.format(nsdecls('w'), round(100*scale))))
 
 
 def set_char_spacing(p_run, space:float=0.0):
@@ -162,19 +165,63 @@ def set_char_spacing(p_run, space:float=0.0):
         parse_xml(r'<w:spacing {} w:val="{}"/>'.format(nsdecls('w'), 20*space)))
 
 
+# Saturated subset of Word's 16-colour highlight palette (omits
+# black/white/greys, which are handled by the shading fallback). Used to
+# snap real highlighter ink to the nearest available <w:highlight>.
+_HIGHLIGHT_PALETTE = (
+    (0xFF0000, WD_COLOR_INDEX.RED),
+    (0x00FF00, WD_COLOR_INDEX.BRIGHT_GREEN),
+    (0x0000FF, WD_COLOR_INDEX.BLUE),
+    (0xFFFF00, WD_COLOR_INDEX.YELLOW),
+    (0xFF00FF, WD_COLOR_INDEX.PINK),
+    (0x00FFFF, WD_COLOR_INDEX.TURQUOISE),
+    (0x800000, WD_COLOR_INDEX.DARK_RED),
+    (0x008000, WD_COLOR_INDEX.GREEN),
+    (0x000080, WD_COLOR_INDEX.DARK_BLUE),
+    (0x808000, WD_COLOR_INDEX.DARK_YELLOW),
+    (0x008080, WD_COLOR_INDEX.TEAL),
+    (0x800080, WD_COLOR_INDEX.VIOLET),
+)
+# Minimum HSV saturation for a fill to be treated as highlighter ink
+# rather than near-grey table shading.
+_HIGHLIGHT_MIN_SATURATION = 0.25
+
+
+def _hsv_saturation(srgb:int) -> float:
+    r, g, b = (srgb >> 16) & 0xFF, (srgb >> 8) & 0xFF, srgb & 0xFF
+    mx = max(r, g, b)
+    if mx == 0:
+        return 0.0
+    return (mx - min(r, g, b)) / mx
+
+
+def _nearest_highlight_color(srgb:int):
+    '''Nearest Word highlight color for a saturated fill, else None.'''
+    if _hsv_saturation(srgb) < _HIGHLIGHT_MIN_SATURATION:
+        return None
+    r, g, b = (srgb >> 16) & 0xFF, (srgb >> 8) & 0xFF, srgb & 0xFF
+    best, best_d = None, None
+    for value, idx in _HIGHLIGHT_PALETTE:
+        pr, pg, pb = (value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF
+        d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+        if best_d is None or d < best_d:
+            best, best_d = idx, d
+    return best
+
+
 def set_char_shading(p_run, srgb:int):
     '''Set character shading color, in case the color is out of highlight color scope.
-    
-    Reference: 
+
+    Reference:
         http://officeopenxml.com/WPtextShading.php
-    
+
     Args:
         p_run (docx.text.run.Run): Proxy object wrapping <w:r> element.
         srgb (int): Color value.
     '''
     # try to set highlight first using python-docx built-in method
     # Here give 6/16 of the valid highlight colors
-    color_map = {        
+    color_map = {
         rgb_value((1,0,0)): WD_COLOR_INDEX.RED,
         rgb_value((0,1,0)): WD_COLOR_INDEX.BRIGHT_GREEN,
         rgb_value((0,0,1)): WD_COLOR_INDEX.BLUE,
@@ -184,12 +231,21 @@ def set_char_shading(p_run, srgb:int):
     }
     if srgb in color_map:
         p_run.font.highlight_color = color_map[srgb]
+        return
 
-    # set char shading
-    else:
-        c = hex(srgb)[2:].zfill(6)
-        xml = r'<w:shd {} w:val="clear" w:color="auto" w:fill="{}"/>'.format(nsdecls('w'), c)
-        p_run._r.get_or_add_rPr().insert(0, parse_xml(xml))
+    # Issue F3: snap saturated highlighter ink (teal, dark green, violet,
+    # ...) to the nearest of the full 16-colour Word highlight palette so
+    # it renders as real <w:highlight> rather than a flat <w:shd> box that
+    # loses the green-vs-teal editorial distinction.
+    nearest = _nearest_highlight_color(srgb)
+    if nearest is not None:
+        p_run.font.highlight_color = nearest
+        return
+
+    # set char shading (low-saturation / near-grey fills only)
+    c = hex(srgb)[2:].zfill(6)
+    xml = r'<w:shd {} w:val="clear" w:color="auto" w:fill="{}"/>'.format(nsdecls('w'), c)
+    p_run._r.get_or_add_rPr().insert(0, parse_xml(xml))
 
 
 def set_char_underline(p_run, srgb:int):
