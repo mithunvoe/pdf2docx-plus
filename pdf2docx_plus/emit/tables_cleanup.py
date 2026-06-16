@@ -271,6 +271,43 @@ def drop_empty_tables(document: Any, *, max_cells: int = 9) -> int:
     return removed
 
 
+def relax_exact_row_heights(document: Any) -> int:
+    """Relax ``<w:trHeight w:hRule="exact">`` to ``"atLeast"`` (Issue B5).
+
+    Upstream ``Row.make_docx`` pins every row to an EXACT height to
+    reproduce the source geometry precisely.  But this converter
+    substitutes the embedded PDF fonts (Liberation / Carlito), and the
+    substitute metrics are slightly taller, so a cell's last text line is
+    clipped at the bottom border and the row is pushed onto its own page
+    — inflating the page count and hiding content.  ``atLeast`` keeps the
+    measured height as a *minimum* (so short/empty spacer rows stay their
+    intended size) while letting a row grow to fit its content.
+
+    Walks the body, headers and footers.  Returns the number of
+    ``<w:trHeight>`` elements relaxed.
+    """
+    changed = 0
+    for tree in _iter_text_containers(document):
+        for trHeight in tree.iter(qn("w:trHeight")):
+            if trHeight.get(qn("w:hRule")) == "exact":
+                trHeight.set(qn("w:hRule"), "atLeast")
+                changed += 1
+    return changed
+
+
+def _iter_text_containers(document: Any) -> list[Any]:
+    """Body plus every header / footer part element (for passes that must
+    also reach table rows living in headers / footers)."""
+    out: list[Any] = [document.element.body]
+    for section in document.sections:
+        for collection in (section.header, section.footer):
+            try:
+                out.append(collection.part.element)
+            except Exception:
+                continue
+    return out
+
+
 def trim_empty_table_rows(document: Any) -> int:
     """Strip empty rows from tables that look like lattice detection
     artifacts.

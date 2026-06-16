@@ -27,7 +27,21 @@ from typing import Any
 # bullet glyphs commonly used in PDFs - kept conservative; if a
 # character is ambiguous (e.g. a hyphen) we require contextual signal
 # to treat it as a bullet.
-_BULLET_CHARS = set("•◦▪‣∙·●○◘◙■□◆▶▷▸▹")
+#
+# NOTE: the full-size square glyphs U+25A1 (□ WHITE SQUARE) and U+25A0
+# (■ BLACK SQUARE) are deliberately EXCLUDED.  In the fund / application
+# forms this converter targets they are checkboxes, not bullets — and
+# U+25A1 is also the canonical empty-checkbox glyph emitted by
+# ``emit/checkbox_glyphs.py``.  Treating them as bullets stripped the
+# tickable box and turned form rows like "□ Yes □ No" into Word bullet
+# items (Issue E1).  Genuine small-square bullets (U+25AA ▪, U+25AB ▫)
+# are retained.
+_BULLET_CHARS = set("•◦▪‣∙·●○◘◙◆▶▷▸▹")
+
+# Binary form-choice words: if a candidate "bullet" is a square glyph
+# immediately followed by one of these, it is a checkbox, not a list.
+_FORM_CHOICE_WORDS = frozenset({"yes", "no", "n/a", "na", "true", "false"})
+_SQUARE_CHECKBOX_GLYPHS = frozenset("■□☐☑☒▣◻◼❏")
 # A separator after the number/letter marker.  Upstream sometimes emits
 # the marker and the body in the *same* run with a single space, but
 # also sometimes with a tab.  We accept both, and tolerate zero
@@ -91,6 +105,15 @@ def detect_list_block(text: str) -> ListMarker | None:
         return None
 
     first = stripped[0]
+    # Defensive guard (Issue E1): a square glyph followed by a binary
+    # form-choice word ("Yes"/"No"/...) is a checkbox, never a list
+    # marker.  This catches square glyphs even if one is re-added to
+    # _BULLET_CHARS or arrives via checkbox canonicalisation.
+    if first in _SQUARE_CHECKBOX_GLYPHS:
+        rest = stripped[1:].lstrip()
+        head = re.split(r"[\s☐-☒■□]", rest, maxsplit=1)[0]
+        if head.lower().strip(".:)") in _FORM_CHOICE_WORDS:
+            return None
     if first in _BULLET_CHARS:
         # include leading whitespace, the bullet glyph, and any whitespace after it
         lead = len(text) - len(stripped)

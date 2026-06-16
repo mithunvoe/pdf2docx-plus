@@ -50,6 +50,7 @@ from .emit import (
     normalize_multi_column_sections,
     promote_header_images_to_section,
     promote_page_numbers_to_footer,
+    relax_exact_row_heights,
     repair_wrap_spacing,
     split_visually_separated_tables,
     trim_empty_table_rows,
@@ -121,6 +122,7 @@ class ConversionResult:
     tables_merged: int = 0
     empty_tables_dropped: int = 0
     empty_table_rows_trimmed: int = 0
+    exact_row_heights_relaxed: int = 0
     sections_flattened: int = 0
     page_footer_lines_promoted: int = 0
     wrap_spaces_repaired: int = 0
@@ -743,6 +745,12 @@ class Converter:
                         if trimmed:
                             dirty = True
                             result.empty_table_rows_trimmed = trimmed
+                        # Issue B5: relax exact row heights so substituted
+                        # fonts don't clip cell text / inflate page count.
+                        relaxed = relax_exact_row_heights(doc)
+                        if relaxed:
+                            dirty = True
+                            result.exact_row_heights_relaxed = relaxed
                         dropped = drop_empty_tables(doc)
                         if dropped:
                             dirty = True

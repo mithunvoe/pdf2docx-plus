@@ -36,6 +36,7 @@ from .table_fit import align_tblgrid_to_cells, fit_oversized_tables
 from .tables_cleanup import (
     drop_empty_tables,
     merge_consecutive_single_row_tables,
+    relax_exact_row_heights,
     split_visually_separated_tables,
     trim_empty_table_rows,
     unwrap_tiny_tables,
@@ -61,6 +62,7 @@ __all__ = [
     "normalize_multi_column_sections",
     "promote_header_images_to_section",
     "promote_page_numbers_to_footer",
+    "relax_exact_row_heights",
     "repair_wrap_spacing",
     "split_visually_separated_tables",
     "trim_empty_table_rows",

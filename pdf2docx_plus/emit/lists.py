@@ -72,7 +72,15 @@ def apply_lists(doc: Any) -> int:
     """
     numbering = _ensure_numbering_part(doc)
 
-    paragraphs = list(doc.paragraphs)
+    # Walk EVERY body paragraph, including those trapped inside table
+    # cells (Issue B2b).  Upstream over-promotes flowing prose / bullet
+    # lists into single-column pseudo-tables, so list items frequently
+    # live in ``<w:tc>`` rather than at body level; ``doc.paragraphs``
+    # only sees body-level paragraphs and would leave those bullets
+    # unnumbered.  We also track each paragraph's container element so a
+    # run of markers never bleeds across a cell boundary (which would
+    # otherwise chain numbering across unrelated cells).
+    paragraphs, parents = _all_body_paragraphs(doc)
     markers: list[ListMarker | None] = [detect_list_block(p.text) for p in paragraphs]
 
     # Walk the markers and accept only when a run satisfies the
@@ -85,11 +93,12 @@ def apply_lists(doc: Any) -> int:
         if m is None:
             i += 1
             continue
-        # extend the run while subsequent paragraphs share kind
+        # extend the run while subsequent paragraphs share kind AND the
+        # same container (do not chain a list across cell boundaries)
         run_end = i + 1
         while run_end < len(markers):
             n = markers[run_end]
-            if n is None or n.kind != m.kind:
+            if n is None or n.kind != m.kind or parents[run_end] is not parents[i]:
                 break
             run_end += 1
         run_len = run_end - i
@@ -101,12 +110,18 @@ def apply_lists(doc: Any) -> int:
     kind_to_num_id: dict[str, int] = {}
     converted = 0
     prev_kind: str | None = None
-    for paragraph, marker, ok in zip(paragraphs, markers, accept, strict=False):
+    prev_parent: Any = None
+    for paragraph, parent, marker, ok in zip(
+        paragraphs, parents, markers, accept, strict=False
+    ):
         if not (marker and ok):
             prev_kind = None
+            prev_parent = None
             continue
         num_id = kind_to_num_id.get(marker.kind)
-        if num_id is None or marker.kind != prev_kind:
+        # restart numbering when the kind changes OR the container
+        # changes (a new cell starts a fresh list)
+        if num_id is None or marker.kind != prev_kind or parent is not prev_parent:
             num_id = _allocate_num_id(
                 numbering, marker.kind, start_at=marker.start_at or 1
             )
@@ -114,7 +129,29 @@ def apply_lists(doc: Any) -> int:
         _apply_list_formatting(paragraph, marker, num_id)
         converted += 1
         prev_kind = marker.kind
+        prev_parent = parent
     return converted
+
+
+def _all_body_paragraphs(doc: Any) -> tuple[list[Any], list[Any]]:
+    """Return every body ``<w:p>`` as a python-docx ``Paragraph`` plus its
+    immediate container element, in document order.
+
+    Unlike ``doc.paragraphs`` (body-level only) this descends into table
+    cells (and nested tables / SDTs) so list markers trapped in
+    pseudo-tables are visible to ``apply_lists``.  The parallel
+    ``parents`` list lets the caller avoid chaining a numbered list across
+    container boundaries.
+    """
+    from docx.text.paragraph import Paragraph  # type: ignore
+
+    paragraphs: list[Any] = []
+    parents: list[Any] = []
+    body = doc.element.body
+    for p in body.iter(qn("w:p")):
+        paragraphs.append(Paragraph(p, doc))
+        parents.append(p.getparent())
+    return paragraphs, parents
 
 
 def _accept_run(kind: str, length: int, run: list[ListMarker | None]) -> bool:

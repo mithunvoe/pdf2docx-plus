@@ -87,21 +87,36 @@ def stitch_cross_page_tables(
     """
     report = StitchReport()
     hf_set = header_footer_texts or set()
+    # A table that spans 3+ pages must keep chaining.  ``_merge_tables``
+    # appends the continuation rows into the left ("accumulator") table and
+    # *removes* the right table from its page, so on the next iteration
+    # ``_last_table(a)`` for that middle page is None and the chain would
+    # break after the first pair (Issue B3).  We therefore carry the
+    # accumulator forward: while a merge is in progress, the left anchor is
+    # the accumulated table (and the page it physically lives on), not the
+    # — now empty — current page.
+    acc_table: Any = None
+    acc_page: Any = None
     for i in range(len(pages) - 1):
         a = pages[i]
         b = pages[i + 1]
         if not (getattr(a, "finalized", False) and getattr(b, "finalized", False)):
+            acc_table = acc_page = None
             continue
 
-        last_a = _last_table(a)
+        if acc_table is not None:
+            left_table, left_page = acc_table, acc_page
+        else:
+            left_table, left_page = _last_table(a), a
         first_b = _first_table(b)
-        if last_a is None or first_b is None:
+        if left_table is None or first_b is None:
+            acc_table = acc_page = None
             continue
 
         reason = _can_stitch(
-            last_a,
+            left_table,
             first_b,
-            a,
+            left_page,
             b,
             bottom_margin_tolerance=bottom_margin_tolerance,
             top_margin_tolerance=top_margin_tolerance,
@@ -111,11 +126,14 @@ def stitch_cross_page_tables(
         )
         if reason is not None:
             report.skipped_pairs.append((a.id, b.id, reason))
+            acc_table = acc_page = None
             continue
 
-        rows_merged = _merge_tables(last_a, first_b, pages=(a, b))
+        rows_merged = _merge_tables(left_table, first_b, pages=(left_page, b))
         report.merged_pairs.append((a.id, b.id))
         report.continuation_rows_merged += rows_merged
+        # keep accumulating into the same table on its original page
+        acc_table, acc_page = left_table, left_page
     return report
 
 
