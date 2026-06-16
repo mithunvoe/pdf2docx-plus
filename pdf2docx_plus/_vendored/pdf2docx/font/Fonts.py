@@ -49,8 +49,10 @@ class Fonts(BaseCollection):
             if target in font.descriptor: return font
 
         # 3rd priority: target name contains font name
+        # (skip empty descriptors: "" in target is always True and would
+        # return a blank-named font, emitting w:ascii="" - Issue F1)
         for font in self:
-            if font.descriptor in target: return font
+            if font.descriptor and font.descriptor in target: return font
 
         return None
 
@@ -96,10 +98,42 @@ class Fonts(BaseCollection):
         return cls(fonts)
 
 
+    # Common PostScript / subset font names mapped to the installed Word
+    # family they should render as (Issue F1). Keys are upper-cased and
+    # stripped of spaces.
+    _FONT_ALIASES = {
+        'ARIALMT': 'Arial',
+        'ARIAL': 'Arial',
+        'ARIALNARROW': 'Arial Narrow',
+        'TIMESNEWROMANPSMT': 'Times New Roman',
+        'TIMESNEWROMANPS': 'Times New Roman',
+        'TIMESNEWROMAN': 'Times New Roman',
+        'COURIERNEWPSMT': 'Courier New',
+        'COURIERNEWPS': 'Courier New',
+        'COURIERNEW': 'Courier New',
+        'SYMBOLMT': 'Symbol',
+    }
+
     @staticmethod
     def _normalized_font_name(name):
-        '''Normalize raw font name, e.g. BCDGEE+Calibri-Bold, BCDGEE+Calibri -> Calibri.'''
-        return name.split('+')[-1].split('-')[0]
+        '''Normalize raw font name, e.g. BCDGEE+Calibri-Bold -> Calibri,
+        ArialMT -> Arial, TimesNewRomanPSMT -> Times New Roman.
+
+        PostScript suffixes (MT / PSMT / PS) are not valid Word family
+        names; leaving them in forces Word to substitute a fallback font
+        and reflow the text (Issue F1).
+        '''
+        base = name.split('+')[-1].split('-')[0]
+        key = base.replace(' ', '').upper()
+        if key in Fonts._FONT_ALIASES:
+            return Fonts._FONT_ALIASES[key]
+        # generic suffix strip, then re-check the alias map
+        for suffix in ('PSMT', 'PS', 'MT'):
+            if base.endswith(suffix) and len(base) > len(suffix):
+                stripped = base[:-len(suffix)]
+                k2 = stripped.replace(' ', '').upper()
+                return Fonts._FONT_ALIASES.get(k2, stripped)
+        return base
 
 
     @staticmethod

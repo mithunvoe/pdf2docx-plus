@@ -102,7 +102,14 @@ class RawPage(BasePage, ABC):
         # check and update font name, line height
         for span in spans:
             font = fonts.get(span.font)
-            if not font: continue
+            if not font:
+                # No embedded font matched (e.g. a base-14 font referenced
+                # by a PostScript name like "ArialMT"). Still normalize the
+                # raw name so we don't emit an invalid Word family that
+                # forces a substitution + reflow (Issue F1).
+                if span.font:
+                    span.font = Fonts._normalized_font_name(span.font)
+                continue
 
             # update font properties with font parsed by fonttools
             span.font = font.name
